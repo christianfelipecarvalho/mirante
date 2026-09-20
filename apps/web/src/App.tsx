@@ -115,9 +115,9 @@ export const App = () => {
               {visible.length === 0 && <EmptyState connection={connection} />}
               {visible.map(([path, lanes]) => (
                 <section key={path}>
-                  <h2 className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                  <h2 className="mb-2 px-1 text-[11px] font-medium text-[var(--text-muted)]">
                     {lanes[0]?.projectName ?? path}
-                    <span className="ml-2 normal-case tracking-normal">
+                    <span className="ml-2">
                       {lanes.length} {t('stat.sessions').toLowerCase()}
                     </span>
                   </h2>

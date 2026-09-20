@@ -3,6 +3,7 @@ import { isWaitingState } from '@mirante/shared';
 import { formatDuration, formatTokens, formatWaitingFor } from '../lib/format';
 import { agentRoleKey, definitionColor, type AgentDefinition } from '../lib/agents';
 import { agentIcon, agentLabel } from '../lib/icons';
+import { Icon, type IconName } from './Icon';
 import { useI18n, type Translate } from '../lib/i18n';
 import { StateBadge } from './StateBadge';
 
@@ -41,7 +42,7 @@ export type AgentCardProps = {
   approval?: PendingApproval | undefined;
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
   onOpen?: (() => void) | undefined;
-  iconOverrides?: Record<string, string>;
+  iconOverrides?: Record<string, IconName>;
 };
 
 export const AgentCardView = ({
@@ -64,22 +65,35 @@ export const AgentCardView = ({
 
   return (
     <article
-      className={`rounded-lg border p-3 transition-colors ${onOpen ? 'cursor-pointer hover:border-[var(--accent)]' : ''}`}
+      className={`relative overflow-hidden rounded-lg border py-3 pl-4 pr-3 transition-colors focus-within:border-[var(--accent)] ${
+        onOpen ? 'cursor-pointer hover:border-[var(--accent)]' : ''
+      }`}
       style={{
         background: 'var(--surface-1)',
         borderColor: waiting
-          ? 'color-mix(in oklab, var(--status-warning) 40%, var(--hairline))'
+          ? 'color-mix(in oklab, var(--status-warning) 45%, var(--hairline))'
           : 'var(--hairline)',
       }}
       onClick={onOpen}
     >
+      {/*
+        A rail rather than a badge: the agent's colour runs the height of its
+        card, so a lane of them reads as a set of channels you can scan down
+        instead of a grid of identical boxes. When the card is blocked the rail
+        switches to the status colour, which is the one thing worth catching
+        from across the room.
+      */}
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-0 left-0 w-[3px]"
+        style={{ background: waiting ? 'var(--status-warning)' : color }}
+      />
       <header className="flex items-start gap-2.5">
         <span
-          aria-hidden="true"
-          className="grid size-8 shrink-0 place-items-center rounded-full text-[15px]"
-          style={{ background: `color-mix(in oklab, ${color} 20%, transparent)`, color }}
+          className="grid size-8 shrink-0 place-items-center rounded-full"
+          style={{ background: `color-mix(in oklab, ${color} 18%, transparent)`, color }}
         >
-          {agentIcon(card.agentType, card.agentId, iconOverrides)}
+          <Icon name={agentIcon(card.agentType, card.agentId, iconOverrides)} size={16} />
         </span>
 
         <div className="min-w-0 flex-1">
@@ -171,8 +185,12 @@ export const AgentCardView = ({
           </span>
         )}
         {card.runningChildren > 0 && (
-          <span className="ml-auto text-[10px]" style={{ color: 'var(--accent)' }}>
-            ⇣ {t('card.agentsRunning', { count: card.runningChildren })}
+          <span
+            className="ml-auto flex items-center gap-1 text-[10px]"
+            style={{ color: 'var(--accent)' }}
+          >
+            <Icon name="down" size={11} />
+            {t('card.agentsRunning', { count: card.runningChildren })}
           </span>
         )}
       </footer>
@@ -204,11 +222,10 @@ const ActivityLine = ({
   return (
     <div className="mt-2 flex items-start gap-1.5 text-[12px]">
       <span
-        aria-hidden="true"
-        className={`mt-[3px] shrink-0 text-[9px] ${running ? 'animate-pulse' : ''}`}
+        className={`mt-[2px] shrink-0 ${running ? 'motion-safe:animate-pulse' : ''}`}
         style={{ color: running ? color : 'var(--text-muted)' }}
       >
-        {running ? '▶' : '↩'}
+        <Icon name={running ? 'play' : 'back'} size={11} />
       </span>
       <div className="min-w-0">
         <div

@@ -1,3 +1,5 @@
+import type { IconName } from './icon-set.js';
+
 /**
  * What a tool call actually is, for someone scanning a list of them.
  *
@@ -10,16 +12,16 @@
 export type ToolCategory =
   'shell' | 'read' | 'write' | 'search' | 'web' | 'agent' | 'skill' | 'wait' | 'other';
 
-export const CATEGORY_GLYPH: Record<ToolCategory, string> = {
-  shell: '❯',
-  read: '▤',
-  write: '✎',
-  search: '⌕',
-  web: '⊕',
-  agent: '⇢',
-  skill: '✦',
-  wait: '◔',
-  other: '▸',
+export const CATEGORY_ICON: Record<ToolCategory, IconName> = {
+  shell: 'terminal',
+  read: 'file',
+  write: 'pencil',
+  search: 'search',
+  web: 'globe',
+  agent: 'handoff',
+  skill: 'skill',
+  wait: 'clock',
+  other: 'dot',
 };
 
 const BY_TOOL: Record<string, ToolCategory> = {

@@ -1,6 +1,7 @@
 import type { MiranteEvent, SessionLane } from '@mirante/shared';
 import { formatTokens, formatWhen } from '../lib/format';
 import { useI18n } from '../lib/i18n';
+import { Icon } from './Icon';
 import { latestTurn } from '../lib/turns';
 
 export type LatestRequestProps = {
@@ -32,7 +33,8 @@ export const LatestRequest = ({ events, sessions, onOpen }: LatestRequestProps) 
       style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
     >
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+        <span className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-secondary)]">
+          <Icon name="prompt" size={12} />
           {t('latest.title')}
         </span>
         {lane && (

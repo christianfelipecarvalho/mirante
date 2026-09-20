@@ -1,7 +1,8 @@
 import type { CardState, CardStatus } from '@mirante/shared';
 import { useI18n } from '../lib/i18n';
+import { Icon, type IconName } from './Icon';
 
-type Meta = { icon: string; color: string };
+type Meta = { icon: IconName; color: string };
 
 /**
  * Status always ships as icon plus label.
@@ -10,15 +11,15 @@ type Meta = { icon: string; color: string };
  * glance distance this board is actually read from.
  */
 export const STATE_META: Record<CardState, Meta> = {
-  idle: { icon: '○', color: 'var(--text-muted)' },
-  thinking: { icon: '◐', color: 'var(--accent)' },
-  tool_running: { icon: '▶', color: 'var(--accent)' },
-  waiting_approval: { icon: '⚠', color: 'var(--status-warning)' },
-  waiting_input: { icon: '⚠', color: 'var(--status-warning)' },
-  waiting_subagent: { icon: '⇣', color: 'var(--accent)' },
-  rate_limited: { icon: '⏸', color: 'var(--status-serious)' },
-  done: { icon: '✓', color: 'var(--status-good)' },
-  error: { icon: '✕', color: 'var(--status-critical)' },
+  idle: { icon: 'circle', color: 'var(--text-muted)' },
+  thinking: { icon: 'thinking', color: 'var(--accent)' },
+  tool_running: { icon: 'play', color: 'var(--accent)' },
+  waiting_approval: { icon: 'alert', color: 'var(--status-warning)' },
+  waiting_input: { icon: 'alert', color: 'var(--status-warning)' },
+  waiting_subagent: { icon: 'down', color: 'var(--accent)' },
+  rate_limited: { icon: 'pause', color: 'var(--status-serious)' },
+  done: { icon: 'check', color: 'var(--status-good)' },
+  error: { icon: 'cross', color: 'var(--status-critical)' },
 };
 
 export const StateBadge = ({ status }: { status: CardStatus }) => {
@@ -34,9 +35,7 @@ export const StateBadge = ({ status }: { status: CardStatus }) => {
         background: 'color-mix(in oklab, currentColor 12%, transparent)',
       }}
     >
-      <span aria-hidden="true" className={live ? 'animate-pulse' : undefined}>
-        {meta.icon}
-      </span>
+      <Icon name={meta.icon} size={12} className={live ? 'motion-safe:animate-pulse' : undefined} />
       {t(`state.${status.state}` as 'state.idle')}
     </span>
   );

@@ -1,53 +1,84 @@
-/**
- * An icon per agent.
- *
- * Deliberately monochrome geometry rather than emoji. An emoji carries its own
- * colour from the font, which overrides the identity colour the lane assigns —
- * so every agent ends up looking alike and the colour channel is wasted. These
- * glyphs inherit `color`, letting shape carry the role and colour carry the
- * individual.
- *
- * Preference order: a user-supplied map, then the agent's own type, then
- * something deterministic. Deterministic matters more than it sounds — an agent
- * that changes glyph between renders is worse than a dull one, because the board
- * is read by glancing.
- */
-const FALLBACK_GLYPHS = ['◆', '●', '▲', '■', '★', '⬟', '◐', '❖', '⬢', '✶', '◈', '▼'] as const;
+import type { IconName } from './icon-set.js';
 
-const KNOWN: Record<string, string> = {
-  main: '⌂',
-  explore: '⌕',
-  search: '⌕',
-  plan: '◇',
-  general: '◆',
-  'general-purpose': '◆',
-  claude: '◆',
-  review: '◉',
-  security: '⬟',
-  audit: '⬟',
-  test: '◈',
-  qa: '◈',
-  docs: '▤',
-  doc: '▤',
-  write: '▤',
-  frontend: '▧',
-  web: '▧',
-  ui: '▧',
-  backend: '▨',
-  api: '▨',
-  data: '▦',
-  build: '⬢',
-  deploy: '⬢',
+/**
+ * An icon per agent, chosen for what the agent does.
+ *
+ * Icons carry the role, and the lane's colour carries the individual — so a
+ * fleet of review-* agents is told apart by colour and number, while a security
+ * reviewer still looks like security work at a glance.
+ *
+ * Deterministic matters more than it sounds: an agent that changes mark between
+ * renders is worse than a dull one, because the board is read by glancing.
+ */
+const FALLBACK: readonly IconName[] = ['agent', 'box', 'layout', 'server', 'beaker', 'map'];
+
+const BY_ROLE: Record<string, IconName> = {
+  main: 'session',
+  explore: 'search',
+  search: 'search',
+  plan: 'map',
+  general: 'agent',
+  'general-purpose': 'agent',
+  claude: 'agent',
+  review: 'check',
+  security: 'shield',
+  audit: 'shield',
+  test: 'beaker',
+  qa: 'beaker',
+  docs: 'file',
+  doc: 'file',
+  write: 'pencil',
+  frontend: 'layout',
+  web: 'layout',
+  ui: 'layout',
+  backend: 'server',
+  api: 'server',
+  data: 'server',
+  build: 'box',
+  deploy: 'box',
+  guide: 'guide',
 };
 
 /**
- * Longest needle first, so `review-frontend` reads as frontend rather than as
- * review. A fleet of `review-*` agents that all share one glyph tells you
- * nothing about which is which.
+ * How specific a role word is.
+ *
+ * `review-frontend` matches both "review" and "frontend"; the domain is what
+ * distinguishes it from its siblings, so the domain wins. Matching runs over
+ * hyphen-delimited segments rather than raw substrings — "qa" inside "quality"
+ * is a coincidence, "qa" as a segment is a claim.
  */
-const NEEDLES = Object.keys(KNOWN)
-  .filter((needle) => needle.length > 2)
-  .sort((a, b) => b.length - a.length);
+const SPECIFICITY: Record<string, number> = {
+  general: 0,
+  'general-purpose': 0,
+  claude: 0,
+  main: 0,
+  review: 1,
+  audit: 1,
+  write: 1,
+  doc: 1,
+  web: 1,
+  api: 1,
+  data: 1,
+  search: 2,
+  explore: 2,
+  plan: 2,
+  test: 2,
+  qa: 2,
+  docs: 2,
+  build: 2,
+  deploy: 2,
+  guide: 2,
+  security: 3,
+  frontend: 3,
+  backend: 3,
+  ui: 3,
+};
+
+const segmentsOf = (value: string): string[] =>
+  value
+    .toLowerCase()
+    .split(/[-_\s.]+/)
+    .filter(Boolean);
 
 const hash = (value: string): number => {
   let h = 2166136261;
@@ -58,24 +89,33 @@ const hash = (value: string): number => {
   return Math.abs(h);
 };
 
-/** An agent we only ever saw finish: honest about being unidentified. */
-export const UNKNOWN_GLYPH = '◌';
-
 export const agentIcon = (
   agentType: string | undefined,
   agentId: string,
-  overrides: Record<string, string> = {},
-): string => {
-  // Hashing an opaque id into a glyph would imply an identity Mirante does not
-  // have. A placeholder says what is true: this one is unidentified.
-  if (!agentType && agentId !== 'main') return UNKNOWN_GLYPH;
-  const key = (agentType ?? agentId).toLowerCase();
-  if (overrides[key]) return overrides[key] as string;
-  if (KNOWN[key]) return KNOWN[key] as string;
-  for (const needle of NEEDLES) {
-    if (key.includes(needle)) return KNOWN[needle] as string;
+  overrides: Record<string, IconName> = {},
+): IconName => {
+  if (agentId === 'main') return 'session';
+  // No type at all means the agent was already running before Mirante saw it.
+  // Inventing a mark would imply an identity it does not have.
+  if (!agentType) return 'unknown';
+
+  const key = agentType.toLowerCase();
+  if (overrides[key]) return overrides[key] as IconName;
+  if (BY_ROLE[key]) return BY_ROLE[key] as IconName;
+
+  let best: { icon: IconName; rank: number } | undefined;
+  for (const segment of segmentsOf(key)) {
+    // A segment can also be an inflection: "reviewer" is a review.
+    const role = BY_ROLE[segment]
+      ? segment
+      : Object.keys(BY_ROLE).find((needle) => needle.length > 3 && segment.startsWith(needle));
+    if (!role) continue;
+    const rank = SPECIFICITY[role] ?? 1;
+    if (!best || rank > best.rank) best = { icon: BY_ROLE[role] as IconName, rank };
   }
-  return FALLBACK_GLYPHS[hash(key) % FALLBACK_GLYPHS.length] as string;
+  if (best) return best.icon;
+
+  return FALLBACK[hash(key) % FALLBACK.length] as IconName;
 };
 
 export const agentLabel = (agentType: string | undefined, agentId: string): string => {

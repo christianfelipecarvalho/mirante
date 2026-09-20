@@ -3,6 +3,7 @@ import { formatCost, formatTokens } from '../lib/format';
 import { useI18n } from '../lib/i18n';
 import { agentOrdinals, type AgentDefinition } from '../lib/agents';
 import { agentColor } from '../lib/palette';
+import { Icon } from './Icon';
 import { AgentCardView } from './AgentCard';
 
 export type SessionLaneProps = {
@@ -38,9 +39,10 @@ export const SessionLaneView = ({
         <button
           type="button"
           onClick={onOpen}
-          className="text-[13px] font-semibold text-[var(--text-primary)] hover:text-[var(--accent)]"
+          className="flex cursor-pointer items-center gap-1.5 text-[13px] font-semibold text-[var(--text-primary)] transition-colors hover:text-[var(--accent)]"
         >
-          {lane.projectName} <span className="text-[10px] font-normal">↗</span>
+          {lane.projectName}
+          <Icon name="open" size={11} />
         </button>
         {lane.gitBranch && (
           <span className="text-[11px] text-[var(--text-secondary)]">⑂ {lane.gitBranch}</span>
@@ -84,7 +86,7 @@ export const SessionLaneView = ({
       */}
       {subagents.length > 0 && (
         <div className="mt-2 border-l pl-3" style={{ borderColor: 'var(--baseline)' }}>
-          <div className="mb-1.5 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+          <div className="mb-1.5 text-[10px] text-[var(--text-muted)]">
             {subagents.length === 1
               ? t('card.subagent.one')
               : t('card.subagents', { count: subagents.length })}

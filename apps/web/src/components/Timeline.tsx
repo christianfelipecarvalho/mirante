@@ -2,17 +2,18 @@ import { useMemo, useState } from 'react';
 import type { TimelineEntry, TimelineKind } from '@mirante/shared';
 import { formatClock } from '../lib/format';
 import { useI18n, type Translate } from '../lib/i18n';
+import { Icon, type IconName } from './Icon';
 
-const KIND_META: Record<TimelineKind, { glyph: string; color: string }> = {
-  prompt: { glyph: '›', color: 'var(--text-secondary)' },
-  'handoff.start': { glyph: '⇢', color: 'var(--accent)' },
-  'handoff.end': { glyph: '⇠', color: 'var(--status-good)' },
-  tool: { glyph: '▸', color: 'var(--text-muted)' },
-  'tool.failed': { glyph: '✕', color: 'var(--status-critical)' },
-  skill: { glyph: '✦', color: 'var(--text-secondary)' },
-  compaction: { glyph: '⋯', color: 'var(--status-serious)' },
-  permission: { glyph: '⚠', color: 'var(--status-warning)' },
-  error: { glyph: '✕', color: 'var(--status-critical)' },
+const KIND_META: Record<TimelineKind, { icon: IconName; color: string }> = {
+  prompt: { icon: 'prompt', color: 'var(--text-secondary)' },
+  'handoff.start': { icon: 'handoff', color: 'var(--accent)' },
+  'handoff.end': { icon: 'back', color: 'var(--status-good)' },
+  tool: { icon: 'dot', color: 'var(--text-muted)' },
+  'tool.failed': { icon: 'cross', color: 'var(--status-critical)' },
+  skill: { icon: 'skill', color: 'var(--text-secondary)' },
+  compaction: { icon: 'compact', color: 'var(--status-serious)' },
+  permission: { icon: 'alert', color: 'var(--status-warning)' },
+  error: { icon: 'cross', color: 'var(--status-critical)' },
 };
 
 type Group = 'all' | 'handoffs' | 'tools' | 'skills' | 'permissions' | 'errors';
@@ -114,11 +115,10 @@ export const Timeline = ({ entries, sessionFilter }: TimelineProps) => {
           return (
             <li key={`${entry.id}-${entry.kind}`} className="flex gap-2 px-1 py-1">
               <span
-                aria-hidden="true"
-                className="mt-[1px] w-3 shrink-0 text-center text-[11px]"
+                className="mt-[2px] flex w-3.5 shrink-0 justify-center"
                 style={{ color: meta.color }}
               >
-                {meta.glyph}
+                <Icon name={meta.icon} size={12} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-1.5">

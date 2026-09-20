@@ -9,6 +9,7 @@ import { agentColor } from '../lib/palette';
 import { buildSteps } from '../lib/steps';
 import { buildTurns, type Turn } from '../lib/turns';
 import { ActivityStream } from './ActivityStream';
+import { Icon, type IconName } from './Icon';
 import { AgentCardView } from './AgentCard';
 import { StateBadge } from './StateBadge';
 
@@ -73,10 +74,11 @@ export const SessionDetail = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded border px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            className="flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
             style={{ borderColor: 'var(--hairline)' }}
           >
-            ← {t('detail.back')}
+            <Icon name="back" size={12} />
+            {t('detail.back')}
           </button>
           <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
             {lane.projectName}
@@ -109,7 +111,7 @@ export const SessionDetail = ({
               key={name}
               type="button"
               onClick={() => setTab(name)}
-              className="rounded px-3 py-1.5 text-[12px] font-medium transition-colors"
+              className="cursor-pointer rounded px-3 py-1.5 text-[12px] font-medium transition-colors"
               style={{
                 background: tab === name ? 'var(--surface-1)' : 'transparent',
                 color: tab === name ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -174,7 +176,7 @@ export const SessionDetail = ({
             >
               <AgentChip
                 label={t('detail.allAgents')}
-                glyph="◎"
+                icon="circle"
                 color="var(--text-secondary)"
                 active={agentId === undefined}
                 onClick={() => setAgentId(undefined)}
@@ -187,7 +189,7 @@ export const SessionDetail = ({
                       ? t('card.session')
                       : agentLabel(card.agentType, card.agentId)
                   }
-                  glyph={agentIcon(card.agentType, card.agentId)}
+                  icon={agentIcon(card.agentType, card.agentId)}
                   color={colorFor(index - 1, card.agentId === 'main')}
                   active={agentId === card.agentId}
                   onClick={() => setAgentId(card.agentId)}
@@ -225,13 +227,13 @@ export const SessionDetail = ({
 
 const AgentChip = ({
   label,
-  glyph,
+  icon,
   color,
   active,
   onClick,
 }: {
   label: string;
-  glyph: string;
+  icon: IconName;
   color: string;
   active: boolean;
   onClick: () => void;
@@ -239,15 +241,15 @@ const AgentChip = ({
   <button
     type="button"
     onClick={onClick}
-    className="flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] transition-colors"
+    className="flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] transition-colors"
     style={{
       borderColor: active ? color : 'var(--hairline)',
       background: active ? `color-mix(in oklab, ${color} 14%, transparent)` : 'transparent',
       color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
     }}
   >
-    <span aria-hidden="true" style={{ color }}>
-      {glyph}
+    <span style={{ color }}>
+      <Icon name={icon} size={12} />
     </span>
     {label}
   </button>

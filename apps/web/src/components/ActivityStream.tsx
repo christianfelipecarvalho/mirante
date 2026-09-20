@@ -2,15 +2,16 @@ import { useMemo } from 'react';
 import type { Step, StepKind, StepStatus } from '../lib/steps';
 import { formatClock } from '../lib/format';
 import { useI18n } from '../lib/i18n';
-import { CATEGORY_GLYPH, describeTool, isPlumbing } from '../lib/tools';
+import { CATEGORY_ICON, describeTool, isPlumbing } from '../lib/tools';
+import { Icon, type IconName } from './Icon';
 
-const NON_TOOL_GLYPH: Record<Exclude<StepKind, 'tool'>, string> = {
-  prompt: '›',
-  agent: '⇢',
-  skill: '✦',
-  permission: '⚠',
-  compaction: '⋯',
-  error: '✕',
+const NON_TOOL_ICON: Record<Exclude<StepKind, 'tool'>, IconName> = {
+  prompt: 'prompt',
+  agent: 'handoff',
+  skill: 'skill',
+  permission: 'alert',
+  compaction: 'compact',
+  error: 'cross',
 };
 
 const STATUS_COLOR: Record<StepStatus, string> = {
@@ -83,9 +84,9 @@ const Row = ({
   const { t } = useI18n();
   const isTool = step.kind === 'tool';
   const described = isTool ? describeTool(step.title, step.detail) : undefined;
-  const glyph = described
-    ? CATEGORY_GLYPH[described.category]
-    : NON_TOOL_GLYPH[step.kind as Exclude<StepKind, 'tool'>];
+  const icon = described
+    ? CATEGORY_ICON[described.category]
+    : NON_TOOL_ICON[step.kind as Exclude<StepKind, 'tool'>];
   // Plumbing stays in the record but recedes, so it never competes with work.
   const recessive = isTool && isPlumbing(step.title) && step.status !== 'failed';
 
@@ -105,11 +106,10 @@ const Row = ({
       <span className="tabular text-[10px] text-[var(--text-muted)]">{formatClock(step.ts)}</span>
 
       <span
-        aria-hidden="true"
-        className={`w-3 text-center ${step.status === 'running' ? 'animate-pulse' : ''}`}
+        className={`flex w-3.5 justify-center self-center ${step.status === 'running' ? 'motion-safe:animate-pulse' : ''}`}
         style={{ color: STATUS_COLOR[step.status] }}
       >
-        {glyph}
+        <Icon name={icon} size={13} />
       </span>
 
       {showAgent ? (

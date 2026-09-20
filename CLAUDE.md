@@ -17,6 +17,23 @@ Read this before changing code. These rules exist because Mirante runs unattende
 - **Write against fixtures, not memory.** Do not code against a schema you remember. Record a real session into `tests/fixtures/`, then write the parser against it. When observation contradicts the documentation, record the divergence in [docs/EVENT_MAP.md](docs/EVENT_MAP.md).
 - **Undocumented surfaces go behind versioned adapters.** The `subagents/` directory layout is internal to Claude Code. Isolate it, detect drift, degrade gracefully.
 
+## Design
+
+Before writing or reshaping any UI, load the `frontend-design` and
+`ui-ux-pro-max` skills and follow them. They are the design authority for this
+repo.
+
+Two constraints are specific to Mirante and override any generic advice:
+
+- **No webfonts, no icon packages, no CDN.** Nothing may leave the machine
+  ([ADR-0005](docs/adr/0005-nothing-leaves-the-machine.md)), so typography is the
+  system stack and icons are drawn inline as SVG on one 24x24 grid. A glyph
+  borrowed from the text font is not an icon: it carries that font's colour and
+  weight, not the one the interface asked for.
+- **Colour never carries meaning alone.** Every state ships an icon and a word.
+  The status palette is reserved for state and never reused as decoration, and
+  absent data reads as "unknown", never as zero.
+
 ## Product rule
 
 Every waiting state must show **what** is being waited on, in short text, on the card. This is the core of the product, not a visual nicety. A state that says only "waiting" is a bug.
