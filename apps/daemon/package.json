@@ -1,0 +1,18 @@
+{
+  "name": "@mirante/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "mirantd — ingest, event log, projector, and local server",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly"
+  },
+  "dependencies": {
+    "@mirante/shared": "workspace:*",
+    "zod": "^3.24.1"
+  }
+}

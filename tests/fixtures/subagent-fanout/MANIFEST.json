@@ -1,14 +1,14 @@
 {
   "name": "subagent-fanout",
-  "recordedAt": "2026-09-20T00:31:43.605Z",
+  "recordedAt": "2026-09-20T00:37:44.079Z",
   "claudeVersion": "2.1.241",
-  "mainEntries": 100,
+  "mainEntries": 469,
   "mainEntriesSlice": {
     "from": 820,
-    "to": 920,
+    "to": 1289,
     "of": 1289
   },
-  "subagentEntriesPerFile": 40,
+  "subagentEntriesPerFile": 200,
   "subagentFiles": [
     "agent-a0db21c0e3e512699.jsonl",
     "agent-a0db21c0e3e512699.meta.json",
@@ -25,6 +25,6 @@
     "agent-af9ca16d3ac392f4f.jsonl",
     "agent-af9ca16d3ac392f4f.meta.json"
   ],
-  "recorderHash": "3fc7e92a6587",
+  "recorderHash": "b8c7025ee3a3",
   "redaction": "Structure, ids, timestamps, tool names and token counts kept. Prompt text, tool inputs, results, absolute paths and branch names replaced. Review by hand before committing."
 }
