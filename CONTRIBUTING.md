@@ -32,8 +32,11 @@ happens by default.
 Changing the daemon, the installer or the shared contract means restarting:
 
 ```bash
-pnpm restart    # rebuild the server packages and start the daemon
+pnpm daemon     # rebuild the server packages and start the daemon
 ```
+
+(Not `restart` — npm treats that name as a lifecycle hook and expands it into
+`stop` followed by `start`, so a script called `restart` never runs.)
 
 To run it the way a user would — everything built, board served by the daemon on
 a single port:
