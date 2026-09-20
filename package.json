@@ -11,16 +11,20 @@
   },
   "scripts": {
     "build": "pnpm -r --filter \"./packages/**\" --filter \"./apps/**\" build",
-    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.test.json",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "build:server": "pnpm --filter @mirante/shared --filter @mirante/installer --filter @mirante/daemon --filter mirante build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+    "dev": "pnpm build:server && node scripts/dev.mjs",
+    "fixture:list": "node --experimental-strip-types scripts/record-fixture.ts --list",
+    "fixture:record": "node --experimental-strip-types scripts/record-fixture.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "restart": "pnpm build:server && node packages/cli/dist/bin.js",
+    "start": "pnpm build && node packages/cli/dist/bin.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
-    "fixture:record": "node --experimental-strip-types scripts/record-fixture.ts",
-    "fixture:list": "node --experimental-strip-types scripts/record-fixture.ts --list"
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.test.json"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

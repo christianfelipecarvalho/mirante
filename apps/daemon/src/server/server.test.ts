@@ -77,6 +77,49 @@ describe('the daemon refuses anything it cannot vouch for', () => {
   });
 });
 
+describe('the dev origin is opt-in and narrow', () => {
+  // Widening the Origin check is the one thing standing between a page the user
+  // happens to have open and their prompts, so it must never happen by default.
+  const devConfig = loadConfig({
+    databasePath: ':memory:',
+    port: PORT,
+    devOrigin: 'http://127.0.0.1:7789',
+  });
+
+  it('is absent unless asked for', () => {
+    expect(config.devOrigin).toBeUndefined();
+  });
+
+  it('still refuses the dev origin when it was not configured', async () => {
+    const response = await makeDaemon().app.inject({
+      method: 'GET',
+      url: '/api/state',
+      headers: { ...auth, origin: 'http://127.0.0.1:7789' },
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('accepts exactly the configured origin once set', async () => {
+    daemon = createDaemon({ config: devConfig, token: TOKEN, watch: false });
+    const allowed = await daemon.app.inject({
+      method: 'GET',
+      url: '/api/state',
+      headers: { ...auth, origin: 'http://127.0.0.1:7789' },
+    });
+    expect(allowed.statusCode).toBe(200);
+  });
+
+  it('does not open the door to anything else', async () => {
+    daemon = createDaemon({ config: devConfig, token: TOKEN, watch: false });
+    const refused = await daemon.app.inject({
+      method: 'GET',
+      url: '/api/state',
+      headers: { ...auth, origin: 'https://evil.example' },
+    });
+    expect(refused.statusCode).toBe(403);
+  });
+});
+
 describe('ingest builds the board', () => {
   it('turns a hook into a lane a client can read back', async () => {
     const d = makeDaemon();

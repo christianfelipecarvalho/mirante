@@ -13,6 +13,35 @@ pnpm install
 pnpm check      # format, lint, typecheck, test
 ```
 
+## Running it while you work
+
+```bash
+pnpm dev
+```
+
+This builds the daemon, starts it on 7788, and serves the board from Vite on
+7789 with hot reload, printing a URL with the token already in it. Edit anything
+under `apps/web` and the browser updates itself — no rebuild, no restart.
+
+Because the board is then served from a different port than the API, the daemon
+has to be told to accept that origin. `pnpm dev` sets `MIRANTE_DEV_ORIGIN` for
+you. It is opt-in and adds exactly one origin: widening the `Origin` check is
+what stands between a page you happen to have open and your prompts, so it never
+happens by default.
+
+Changing the daemon, the installer or the shared contract means restarting:
+
+```bash
+pnpm restart    # rebuild the server packages and start the daemon
+```
+
+To run it the way a user would — everything built, board served by the daemon on
+a single port:
+
+```bash
+pnpm start
+```
+
 ## Repository layout
 
 | Path                 | What lives there                                                 |

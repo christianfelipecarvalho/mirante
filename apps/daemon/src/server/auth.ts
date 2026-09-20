@@ -20,10 +20,11 @@ const safeEqual = (a: string, b: string): boolean => {
   return timingSafeEqual(left, right);
 };
 
-export const allowedOrigins = (port: number): string[] => [
+export const allowedOrigins = (port: number, devOrigin?: string): string[] => [
   `http://127.0.0.1:${port}`,
   `http://localhost:${port}`,
   `http://[::1]:${port}`,
+  ...(devOrigin ? [devOrigin] : []),
 ];
 
 export const extractToken = (
@@ -48,13 +49,15 @@ export const authorize = (args: {
   query: unknown;
   token: string;
   port: number;
+  /** Only ever set from MIRANTE_DEV_ORIGIN. See MiranteConfig. */
+  devOrigin?: string;
 }): AuthResult => {
   const origin = args.headers.origin;
   if (typeof origin === 'string' && origin.length > 0) {
     // Hooks and the status line send no Origin at all; a browser always does on
     // a cross-origin request. So a present-but-wrong Origin is a page trying to
     // reach the daemon, and is refused before the token is even considered.
-    if (!allowedOrigins(args.port).includes(origin)) {
+    if (!allowedOrigins(args.port, args.devOrigin).includes(origin)) {
       return { ok: false, status: 403, reason: 'origin not allowed' };
     }
   }

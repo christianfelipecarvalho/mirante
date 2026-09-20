@@ -21,6 +21,15 @@ export type MiranteConfig = {
    * through. See ARCHITECTURE.md.
    */
   approvalWindowMs: number;
+  /**
+   * One extra browser origin to accept, for running the board from Vite's dev
+   * server while the daemon serves the API.
+   *
+   * Opt-in through MIRANTE_DEV_ORIGIN and empty otherwise: widening the Origin
+   * check is the one thing standing between a page you happen to have open and
+   * your prompts, so it never happens by default or by inference.
+   */
+  devOrigin?: string;
 };
 
 const DEFAULT_PORT = 7788;
@@ -46,6 +55,9 @@ export const loadConfig = (overrides: Partial<MiranteConfig> = {}): MiranteConfi
       process.env.CLAUDE_PROJECTS_DIR ??
       join(homedir(), '.claude', 'projects'),
     approvalWindowMs: overrides.approvalWindowMs ?? envNumber('MIRANTE_APPROVAL_WINDOW_MS', 20_000),
+    ...((overrides.devOrigin ?? process.env.MIRANTE_DEV_ORIGIN)
+      ? { devOrigin: overrides.devOrigin ?? process.env.MIRANTE_DEV_ORIGIN }
+      : {}),
   };
 };
 

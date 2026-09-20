@@ -70,6 +70,7 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
       query: request.query,
       token,
       port: config.port,
+      ...(config.devOrigin ? { devOrigin: config.devOrigin } : {}),
     });
     if (result.ok) return true;
     // Deliberately terse: an error that distinguishes "wrong token" from "no
@@ -177,6 +178,7 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
         query: request.query,
         token,
         port: config.port,
+        ...(config.devOrigin ? { devOrigin: config.devOrigin } : {}),
       });
       if (!result.ok) {
         socket.close(1008, result.reason);
