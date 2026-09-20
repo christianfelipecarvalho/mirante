@@ -104,6 +104,11 @@ const en = {
   'detail.planAtTime': 'Plan usage',
   'detail.planUnknown': 'not reported',
 
+  'hint.planTitle': 'Plan limits need a terminal session',
+  'hint.planBody':
+    'The status line is the only source of the 5-hour and weekly limits, and it runs in the terminal interface — the VS Code integrated terminal counts, the VS Code extension does not.',
+  'hint.planAction': 'Run claude in a terminal once, then check again',
+
   'latest.title': 'Latest request',
   'latest.in': 'in {project}',
   'latest.none': 'No request captured yet.',
@@ -218,6 +223,11 @@ const ptBR: Record<Key, string> = {
   'detail.toolsFailed': '{count} falharam',
   'detail.planAtTime': 'Uso do plano',
   'detail.planUnknown': 'não reportado',
+
+  'hint.planTitle': 'Limites do plano precisam de uma sessão no terminal',
+  'hint.planBody':
+    'A status line é a única fonte dos limites de 5 horas e semanal, e ela roda na interface de terminal — o terminal integrado do VS Code conta, a extensão do VS Code não.',
+  'hint.planAction': 'Rode claude num terminal uma vez e confira de novo',
 
   'latest.title': 'Última solicitação',
   'latest.in': 'em {project}',

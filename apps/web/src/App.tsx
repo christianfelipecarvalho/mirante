@@ -3,6 +3,7 @@ import type { SessionLane } from '@mirante/shared';
 import { useBoard, type Connection } from './lib/client';
 import { useI18n } from './lib/i18n';
 import { LatestRequest } from './components/LatestRequest';
+import { PlanHint } from './components/PlanHint';
 import { SessionDetail } from './components/SessionDetail';
 import { SessionLaneView } from './components/SessionLane';
 import { Timeline } from './components/Timeline';
@@ -73,6 +74,7 @@ export const App = () => {
         />
       ) : (
         <>
+          <PlanHint board={board} />
           <LatestRequest events={events} sessions={board.sessions} onOpen={setOpenSessionId} />
 
           {/* Filters sit in one row above the board, never inside it. */}
