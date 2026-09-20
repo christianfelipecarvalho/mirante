@@ -155,11 +155,30 @@ export const doctor = async (overrides: Partial<MiranteConfig> = {}): Promise<nu
       );
 
       const statusLineEvents = bySource.get('statusline') ?? 0;
-      check(
-        statusLineEvents > 0 ? 'pass' : 'warn',
-        'Status line reporting',
-        `${statusLineEvents} events`,
-      );
+      if (statusLineEvents > 0) {
+        check('pass', 'Status line reporting', `${statusLineEvents} events`);
+      } else {
+        // The status line is a terminal-interface feature. Sessions running in an
+        // editor extension never invoke it, so plan usage and cost cannot arrive
+        // from them — which looks exactly like a broken install unless it is
+        // spelled out here.
+        const entrypoints = new Set(
+          events
+            .filter((event) => event.kind === 'session.started')
+            .map((event) => (event.payload as { entrypoint?: string }).entrypoint),
+        );
+        const onlyEditor = entrypoints.size > 0 && !entrypoints.has('cli');
+        check(
+          'warn',
+          'Status line reporting',
+          onlyEditor
+            ? '0 events — every session seen so far runs in an editor, and the status line runs in the terminal'
+            : '0 events — open a terminal session, or check that `mirante install` ran',
+        );
+        if (onlyEditor) {
+          check('info', 'To get plan usage and cost', 'run `claude` in a terminal at least once');
+        }
+      }
 
       const sawPlanUsage = events.some((event) => event.kind === 'plan.usage.updated');
       if (sawPlanUsage) {

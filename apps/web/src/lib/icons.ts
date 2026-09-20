@@ -1,29 +1,53 @@
 /**
  * An icon per agent.
  *
- * Preference order, per the product brief: a user-supplied map, then the agent's
- * own frontmatter, then something deterministic. Deterministic matters more than
- * it sounds — an agent that changes glyph between renders is worse than a dull
- * one, because the board is read by glancing.
+ * Deliberately monochrome geometry rather than emoji. An emoji carries its own
+ * colour from the font, which overrides the identity colour the lane assigns —
+ * so every agent ends up looking alike and the colour channel is wasted. These
+ * glyphs inherit `color`, letting shape carry the role and colour carry the
+ * individual.
+ *
+ * Preference order: a user-supplied map, then the agent's own type, then
+ * something deterministic. Deterministic matters more than it sounds — an agent
+ * that changes glyph between renders is worse than a dull one, because the board
+ * is read by glancing.
  */
 const FALLBACK_GLYPHS = ['◆', '●', '▲', '■', '★', '⬟', '◐', '❖', '⬢', '✶', '◈', '▼'] as const;
 
 const KNOWN: Record<string, string> = {
   main: '⌂',
-  explore: '🔍',
-  plan: '🗺',
+  explore: '⌕',
+  search: '⌕',
+  plan: '◇',
   general: '◆',
   'general-purpose': '◆',
-  review: '🔎',
-  security: '🛡',
-  test: '🧪',
-  docs: '📄',
-  frontend: '🖼',
-  backend: '⚙',
-  qa: '✓',
-  build: '🔨',
   claude: '◆',
+  review: '◉',
+  security: '⬟',
+  audit: '⬟',
+  test: '◈',
+  qa: '◈',
+  docs: '▤',
+  doc: '▤',
+  write: '▤',
+  frontend: '▧',
+  web: '▧',
+  ui: '▧',
+  backend: '▨',
+  api: '▨',
+  data: '▦',
+  build: '⬢',
+  deploy: '⬢',
 };
+
+/**
+ * Longest needle first, so `review-frontend` reads as frontend rather than as
+ * review. A fleet of `review-*` agents that all share one glyph tells you
+ * nothing about which is which.
+ */
+const NEEDLES = Object.keys(KNOWN)
+  .filter((needle) => needle.length > 2)
+  .sort((a, b) => b.length - a.length);
 
 const hash = (value: string): number => {
   let h = 2166136261;
@@ -42,8 +66,8 @@ export const agentIcon = (
   const key = (agentType ?? agentId).toLowerCase();
   if (overrides[key]) return overrides[key] as string;
   if (KNOWN[key]) return KNOWN[key] as string;
-  for (const [needle, glyph] of Object.entries(KNOWN)) {
-    if (needle.length > 3 && key.includes(needle)) return glyph;
+  for (const needle of NEEDLES) {
+    if (key.includes(needle)) return KNOWN[needle] as string;
   }
   return FALLBACK_GLYPHS[hash(key) % FALLBACK_GLYPHS.length] as string;
 };

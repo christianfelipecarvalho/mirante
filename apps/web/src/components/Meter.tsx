@@ -15,9 +15,11 @@ export type MeterProps = {
   label: string;
   percentage: number | undefined;
   resetsAt?: number | undefined;
+  /** Shown in place of a reset time when the value is unknown, so absence is explained. */
+  unknownHint?: string;
 };
 
-export const Meter = ({ label, percentage, resetsAt }: MeterProps) => {
+export const Meter = ({ label, percentage, resetsAt, unknownHint }: MeterProps) => {
   // Absence is not zero. Plan usage is missing for API-key users, before the
   // first API response, and once a window has reset — saying "unknown" is the
   // only honest rendering.
@@ -50,6 +52,11 @@ export const Meter = ({ label, percentage, resetsAt }: MeterProps) => {
       </div>
       {known && resetsAt !== undefined && (
         <div className="mt-1 text-[10px] text-[var(--text-muted)]">{formatReset(resetsAt)}</div>
+      )}
+      {!known && unknownHint && (
+        <div className="mt-1 text-[10px] text-[var(--text-muted)]" title={unknownHint}>
+          {unknownHint}
+        </div>
       )}
     </div>
   );

@@ -244,3 +244,47 @@ describe('sessions', () => {
     expect(state.sessions[0]?.cards.every((c) => c.status.state === 'done')).toBe(true);
   });
 });
+
+describe('a card never goes blank', () => {
+  // "Thinking" with no other text is the state a card is most often caught in,
+  // and on its own it answers none of the questions this board exists for.
+  const withTool = () =>
+    board(
+      sessionStart(),
+      ev({ kind: 'prompt.submitted', payload: { preview: 'fix the build', charCount: 13 } }),
+      ev({
+        kind: 'tool.started',
+        payload: { toolUseId: 'toolu_9', toolName: 'Bash', summary: 'pnpm build' },
+      }),
+    );
+
+  it('shows the running tool while it runs', () => {
+    const card = cardOf(withTool(), MAIN_AGENT_ID);
+    expect(card?.activity).toBe('Bash: pnpm build');
+    expect(card?.status.state).toBe('tool_running');
+  });
+
+  it('remembers the last action once the tool returns', () => {
+    const state = board(
+      sessionStart(),
+      ev({ kind: 'prompt.submitted', payload: { preview: 'fix the build', charCount: 13 } }),
+      ev({
+        kind: 'tool.started',
+        payload: { toolUseId: 'toolu_9', toolName: 'Bash', summary: 'pnpm build' },
+      }),
+      ev({ kind: 'tool.finished', payload: { toolUseId: 'toolu_9', toolName: 'Bash' } }),
+    );
+    const card = cardOf(state, MAIN_AGENT_ID);
+    expect(card?.activity).toBeUndefined();
+    expect(card?.lastActivity).toBe('Bash: pnpm build');
+    expect(card?.status.state).toBe('thinking');
+  });
+
+  it('falls back to the prompt when no tool has run yet', () => {
+    const state = board(
+      sessionStart(),
+      ev({ kind: 'prompt.submitted', payload: { preview: 'fix the build', charCount: 13 } }),
+    );
+    expect(cardOf(state, MAIN_AGENT_ID)?.lastActivity).toBe('Prompt: fix the build');
+  });
+});

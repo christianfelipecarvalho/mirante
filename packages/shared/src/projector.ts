@@ -97,12 +97,14 @@ export class BoardProjector {
       case 'prompt.submitted': {
         card.status = active('thinking');
         card.activity = event.payload.preview;
+        card.lastActivity = `Prompt: ${event.payload.preview}`;
         this.push(event, 'prompt', event.payload.preview);
         break;
       }
 
       case 'agent.started': {
         card.agentType = event.payload.agentType;
+        if (event.payload.description) card.lastActivity = event.payload.description;
         if (event.parentAgentId) card.parentAgentId = event.parentAgentId;
         if (event.payload.model) card.model = event.payload.model;
         card.spawnMode = event.payload.spawnMode;
@@ -164,6 +166,7 @@ export class BoardProjector {
         card.activity = event.payload.summary
           ? `${event.payload.toolName}: ${event.payload.summary}`
           : event.payload.toolName;
+        card.lastActivity = card.activity;
         this.push(event, 'tool', card.activity);
         break;
       }
@@ -183,6 +186,7 @@ export class BoardProjector {
           if (card.status.state === 'tool_running') card.status = active('thinking');
         }
         card.activity = `${event.payload.toolName} failed`;
+        card.lastActivity = card.activity;
         this.push(event, 'tool.failed', `${event.payload.toolName}: ${event.payload.errorPreview}`);
         break;
       }

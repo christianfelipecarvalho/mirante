@@ -12,6 +12,22 @@ const CONNECTION_META: Record<Connection, { label: string; color: string; icon: 
   unauthorized: { label: 'Token rejected', color: 'var(--status-critical)', icon: '✕' },
 };
 
+/**
+ * Why the plan meters are empty.
+ *
+ * Plan limits reach one surface only: the status line, which runs in the
+ * terminal interface. A board showing nothing but "unknown" invites the reader
+ * to assume Mirante is broken, so it says which of the reasons applies.
+ */
+const planHint = (board: BoardState): string | undefined => {
+  if (board.planUsage) return undefined;
+  const entrypoints = new Set(board.sessions.map((session) => session.entrypoint));
+  if (entrypoints.size > 0 && !entrypoints.has('cli')) {
+    return 'no status line outside the terminal';
+  }
+  return 'needs Pro or Max, after one reply';
+};
+
 export const TopBar = ({ board, connection }: { board: BoardState; connection: Connection }) => {
   const active = board.sessions.filter((s) => !s.endedAt);
   const tokens = board.sessions.map((s) => s.tokens).reduce(addTokenUsage, emptyTokenUsage());
@@ -21,6 +37,7 @@ export const TopBar = ({ board, connection }: { board: BoardState; connection: C
     0,
   );
   const status = CONNECTION_META[connection];
+  const hint = planHint(board);
 
   return (
     <header
@@ -57,11 +74,13 @@ export const TopBar = ({ board, connection }: { board: BoardState; connection: C
           label="5-hour limit"
           percentage={board.planUsage?.fiveHour?.usedPercentage}
           resetsAt={board.planUsage?.fiveHour?.resetsAt}
+          unknownHint={hint}
         />
         <Meter
           label="Weekly limit"
           percentage={board.planUsage?.sevenDay?.usedPercentage}
           resetsAt={board.planUsage?.sevenDay?.resetsAt}
+          unknownHint={hint}
         />
         {board.planUsage?.spendLimit && (
           <Meter

@@ -20,6 +20,13 @@ export type AgentCard = {
   status: CardStatus;
   /** The single line under the card title: what this agent is doing right now. */
   activity?: string;
+  /**
+   * The last thing this agent did, kept after it finishes.
+   *
+   * Without it a card goes blank the moment a tool returns, which is most of the
+   * time a card is looked at — "Thinking" on its own answers nothing.
+   */
+  lastActivity?: string;
   currentTool?: RunningTool;
   activeSkill?: string;
   model?: string;
