@@ -30,6 +30,8 @@ export const pathsFor = (
 const manifestPath = (home: string) => join(home, 'install-manifest.json');
 const wrapperPath = (home: string) => join(home, 'statusline.mjs');
 const wrapperConfigPath = (home: string) => join(home, 'statusline.json');
+/** Written on every status line run, listening daemon or not. See doctor. */
+const heartbeatPath = (home: string) => join(home, 'statusline-last-run');
 const backupsDir = (home: string) => join(home, 'backups');
 
 export const readManifest = (home: string): InstallManifest | undefined => {
@@ -91,7 +93,7 @@ export const install = (options: InstallOptions): InstallOutcome => {
   );
   writeFileWithMode(
     plan.statusLineWrapperPath,
-    statusLineWrapperSource(wrapperConfigPath(paths.mirantehome)),
+    statusLineWrapperSource(wrapperConfigPath(paths.mirantehome), heartbeatPath(paths.mirantehome)),
     0o700,
   );
 
