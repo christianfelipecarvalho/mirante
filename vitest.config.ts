@@ -7,6 +7,7 @@ export default defineConfig({
       // Tests run against source, not against a build artifact, so a failing test
       // points at the line that caused it and `pnpm test` needs no build first.
       '@mirante/shared': fileURLToPath(new URL('./packages/shared/src/index.ts', import.meta.url)),
+      '@mirante/daemon': fileURLToPath(new URL('./apps/daemon/src/index.ts', import.meta.url)),
     },
   },
   test: {

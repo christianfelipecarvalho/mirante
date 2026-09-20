@@ -8,7 +8,8 @@
     "sourceMap": false,
     "types": ["node"],
     "paths": {
-      "@mirante/shared": ["./packages/shared/src/index.ts"]
+      "@mirante/shared": ["./packages/shared/src/index.ts"],
+      "@mirante/daemon": ["./apps/daemon/src/index.ts"]
     }
   },
   "include": [
