@@ -138,8 +138,18 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     ...(ctx.parentAgentId === undefined ? {} : { parentAgentId: ctx.parentAgentId }),
   });
 
-  entries.forEach((entry, index) => {
-    if (isMain && index === 0) {
+  // Transcripts open with bookkeeping records — bridge-session, queue-operation,
+  // ai-title and friends — that carry no cwd and often no timestamp. Treating the
+  // first line as the start of the session reads project, branch and entrypoint
+  // off a record that has none of them.
+  const conversational = entries.filter(
+    (entry) => entry.type === 'user' || entry.type === 'assistant',
+  );
+  let sessionStartEmitted = false;
+
+  conversational.forEach((entry) => {
+    if (isMain && !sessionStartEmitted && entry.cwd && entry.timestamp) {
+      sessionStartEmitted = true;
       events.push({
         ...base(entry),
         kind: 'session.started',
@@ -156,6 +166,10 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     // `attributionSkill` is the validated source for the active skill: it is set
     // on every entry the skill covers, so a skill invoked before the window still
     // shows up. See docs/EVENT_MAP.md §6 D4.
+    // `attributionSkill` is absent on entries the skill does not cover, so it
+    // flickers between a name and nothing while a skill is active. Tracking the
+    // last *named* skill instead of the last value collapses that into one
+    // timeline row per invocation rather than one per toggle.
     const skill = entry.attributionSkill ?? undefined;
     if (skill && skill !== lastSkill) {
       events.push({
@@ -163,8 +177,8 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
         kind: 'skill.invoked',
         payload: { skillName: skill },
       });
+      lastSkill = skill;
     }
-    if (skill !== lastSkill) lastSkill = skill;
 
     if (entry.type === 'assistant') {
       if (entry.message?.usage) {

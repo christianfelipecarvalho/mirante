@@ -334,6 +334,13 @@ export class BoardProjector {
     const existing = this.lanes.get(event.sessionId);
     if (existing) {
       if (event.gitBranch) existing.gitBranch = event.gitBranch;
+      // The first event of a session can arrive before anything knows where it
+      // is running — a hook fires before the transcript is flushed. Fill the
+      // lane's identity in from whichever event supplies it first.
+      if (!existing.projectPath && event.projectPath) {
+        existing.projectPath = event.projectPath;
+        existing.projectName = projectNameOf(event.projectPath);
+      }
       return existing;
     }
     const lane: SessionLane = {

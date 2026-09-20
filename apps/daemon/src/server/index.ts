@@ -78,8 +78,6 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
     return false;
   };
 
-  void app.register(websocket);
-
   app.get('/health', async () => ({ ok: true, events: log.count() }));
 
   /**
@@ -166,22 +164,30 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
     },
   );
 
-  app.get('/ws', { websocket: true }, (socket, request) => {
-    const result = authorize({
-      headers: request.headers as Record<string, unknown>,
-      query: request.query,
-      token,
-      port: config.port,
-    });
-    if (!result.ok) {
-      socket.close(1008, result.reason);
-      return;
-    }
+  // The websocket plugin has to finish loading before a route can ask for
+  // `websocket: true`. Registering both inside one scope makes that ordering
+  // explicit — declaring the route beside an unawaited register silently hands
+  // the handler an HTTP reply instead of a socket, and every upgrade 500s.
+  void app.register(async (instance) => {
+    await instance.register(websocket);
 
-    sockets.add(socket);
-    socket.send(JSON.stringify({ type: 'snapshot', state: projector.snapshot() }));
-    socket.on('close', () => sockets.delete(socket));
-    socket.on('error', () => sockets.delete(socket));
+    instance.get('/ws', { websocket: true }, (socket, request) => {
+      const result = authorize({
+        headers: request.headers as Record<string, unknown>,
+        query: request.query,
+        token,
+        port: config.port,
+      });
+      if (!result.ok) {
+        socket.close(1008, result.reason);
+        return;
+      }
+
+      sockets.add(socket);
+      socket.send(JSON.stringify({ type: 'snapshot', state: projector.snapshot() }));
+      socket.on('close', () => sockets.delete(socket));
+      socket.on('error', () => sockets.delete(socket));
+    });
   });
 
   if (options.webRoot && existsSync(options.webRoot)) {

@@ -62,7 +62,7 @@ Two constraints shape that wrapper. Claude Code debounces status line updates at
 
 ## Event log and projector
 
-The event log is **append-only** with a gapless monotonic `id`. Clients replay from any `id`, so closing and reopening the browser rebuilds the board exactly.
+The event log is **append-only** with a strictly increasing `id`, assigned on insert and nowhere else. Clients replay from any `id`, so closing and reopening the browser rebuilds the board exactly.
 
 Hooks and the transcript both report the same underlying fact — a tool call, for instance — from different angles and at different times. The log keeps both records, because it is also an audit trail. The **projector** deduplicates using `dedupeKey` (for example `tool.started:toolu_01ABC`) when folding events into board state. Without this, every tool call would appear twice.
 
@@ -82,16 +82,31 @@ Every waiting state must display, in short text, **what** is being waited on. Th
 
 ## On-screen approval
 
-A `PreToolUse` hook reaches the daemon, which opens a pending request and flips the card to `waiting_approval`.
+Two hook events could plausibly drive this, and the difference matters.
 
-The controlling rule comes from the hook documentation: **a hook that exceeds its timeout on `PreToolUse` does not block the call** — it proceeds through the normal permission flow. So:
+**`PreToolUse` fires before every tool call**, permission needed or not. **`PermissionRequest`
+fires only when Claude Code is about to ask.** Gating on `PreToolUse` would add the approval
+window to every tool call in the session, so Mirante uses it for ingest only and answers it
+immediately. `PermissionRequest` is the gate.
 
-1. The daemon waits a short, configurable time, always shorter than the hook timeout.
-2. If the user clicks, it returns `permissionDecision: "allow"` or `"deny"` with a reason.
-3. If nobody clicks, it returns `"ask"` and lets the terminal prompt, marking in the UI that it fell through.
+When one arrives, the daemon opens a pending request and flips the card to `waiting_approval`.
+`PermissionRequest` carries no `tool_use_id`, so the daemon mints its own request id.
+
+1. The daemon waits a short, configurable window (`approvalWindowMs`, default 20 s).
+2. If someone clicks, it returns `hookSpecificOutput.decision.behavior` of `allow` or `deny`.
+3. If nobody clicks, it returns **no decision object**. Claude Code's permission flow continues
+   untouched and the terminal asks.
 4. The card leaves `waiting_approval` only when a resolution arrives, from either path.
 
-The installed hook sets an explicit short timeout rather than inheriting the 600-second default. Nothing in the design ever depends on holding a hook open.
+There is no `ask` value to return; the fallback _is_ the absence of a decision. A hook that
+exceeds its timeout has its output discarded and lands in the same place, so the fallback is
+safe by construction rather than by timing. The installed hook still sets an explicit timeout
+comfortably longer than the approval window, so a click can win — and far shorter than the
+600-second default.
+
+One case is worth knowing about: in sessions that cannot show a prompt, such as background
+subagents in non-interactive mode, Claude Code denies a call when no hook returns a decision.
+There, the board is the only place the request can be answered at all.
 
 ## Security model
 

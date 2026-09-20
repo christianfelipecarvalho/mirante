@@ -1,0 +1,22 @@
+{
+  "name": "session-start",
+  "recordedAt": "2026-09-20T09:53:16.835Z",
+  "claudeVersion": "2.1.220",
+  "mainEntries": 112,
+  "mainEntriesSlice": {
+    "from": 0,
+    "to": 112,
+    "of": 112
+  },
+  "subagentEntriesPerFile": 30,
+  "subagentFiles": [
+    "agent-a2c64902276999781.jsonl",
+    "agent-a2c64902276999781.meta.json",
+    "agent-a5ab3c742d0bad8d0.jsonl",
+    "agent-a5ab3c742d0bad8d0.meta.json",
+    "agent-af725f2889b3ca412.jsonl",
+    "agent-af725f2889b3ca412.meta.json"
+  ],
+  "recorderHash": "b8c7025ee3a3",
+  "redaction": "Structure, ids, timestamps, tool names and token counts kept. Prompt text, tool inputs, results, absolute paths and branch names replaced. Review by hand before committing."
+}
