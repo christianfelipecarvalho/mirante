@@ -1,0 +1,39 @@
+name: Schema drift
+description: A Claude Code update changed a hook, transcript, or status line shape
+labels: [schema-drift]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Mirante reads surfaces that can change between Claude Code releases. These reports are
+        genuinely valuable — they are usually the first signal that something moved.
+
+  - type: input
+    id: version
+    attributes:
+      label: Claude Code version where it broke
+      description: And the last version where it worked, if you know it
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface
+      options:
+        - Hook payload
+        - Main transcript JSONL
+        - Subagent directory layout
+        - Status line JSON
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What you observed
+      description: Field names and shapes, redacted. Never paste real tokens or keys.
+      render: json
+    validations:
+      required: true

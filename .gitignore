@@ -141,3 +141,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Mirante
+.mirante/
+*.db
+*.db-journal
+*.db-wal

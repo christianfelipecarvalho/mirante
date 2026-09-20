@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest something Mirante should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you unable to see or do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Which milestone do you think this belongs to?
+      options:
+        - 'M1 — live board'
+        - 'M2 — history, search, export, OTel'
+        - 'M3 — fleet view and alerts'
+        - 'M4 — driver mode'
+        - 'Not sure'

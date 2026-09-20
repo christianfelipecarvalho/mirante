@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in Mirante does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do not paste prompts or tool inputs that contain secrets.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `npx mirante install`
+        2. Start a session and ask it to spawn a subagent
+        3. The subagent card does not appear
+    validations:
+      required: true
+
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`
+    validations:
+      required: true
+
+  - type: input
+    id: mirante-version
+    attributes:
+      label: Mirante version
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: '`mirante doctor` output'
+      render: shell
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and Node version
+      placeholder: 'Ubuntu 24.04, Node 22.18.0'
+    validations:
+      required: true
