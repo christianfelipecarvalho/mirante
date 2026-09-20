@@ -8,6 +8,8 @@ export type MiranteConfig = {
   home: string;
   databasePath: string;
   tokenPath: string;
+  /** Written while the daemon is listening, so a later run can take the port over. */
+  pidPath: string;
   /** Loopback only. Binding anywhere else would expose prompts to the network. */
   host: string;
   port: number;
@@ -47,6 +49,7 @@ export const loadConfig = (overrides: Partial<MiranteConfig> = {}): MiranteConfi
     home,
     databasePath: overrides.databasePath ?? join(home, 'mirante.db'),
     tokenPath: overrides.tokenPath ?? join(home, 'token'),
+    pidPath: overrides.pidPath ?? join(home, 'daemon.pid'),
     // Not configurable by environment on purpose. See ADR-0005.
     host: '127.0.0.1',
     port: overrides.port ?? envNumber('MIRANTE_PORT', DEFAULT_PORT),

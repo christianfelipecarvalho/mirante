@@ -1,5 +1,14 @@
 #!/usr/bin/env node
-import { EventLog, loadConfig, loadOrCreateToken, start } from '@mirante/daemon';
+import {
+  EventLog,
+  inspectPort,
+  loadConfig,
+  loadOrCreateToken,
+  readPidFile,
+  removePidFile,
+  start,
+  stopDaemon,
+} from '@mirante/daemon';
 import { defaultSettingsPath, install, pathsFor, uninstall } from '@mirante/installer';
 import { doctor } from './doctor.js';
 import { bullet, heading, line, ui } from './ui.js';
@@ -11,6 +20,7 @@ ${ui.bold('mirante')} — local lookout for coding agents
   ${ui.cyan('mirante')}              start the daemon and open the board
   ${ui.cyan('mirante install')}      wire hooks and the status line into Claude Code
   ${ui.cyan('mirante uninstall')}    undo exactly what install wrote
+  ${ui.cyan('mirante stop')}         stop a daemon started earlier
   ${ui.cyan('mirante doctor')}       check that data is actually arriving
   ${ui.cyan('mirante purge')}        delete everything Mirante has stored
 
@@ -125,7 +135,63 @@ const runPurge = (flags: Map<string, string | boolean>): number => {
   return 0;
 };
 
+/**
+ * Makes room on the port, without ever killing something that is not ours.
+ *
+ * A previous Mirante is identified by its own /health response and stopped with
+ * SIGTERM so it closes its database and releases pending permission requests.
+ * Anything else holding the port belongs to someone else: say so and stop.
+ */
+const claimPort = async (flags: Map<string, string | boolean>): Promise<boolean> => {
+  const config = loadConfig(configOverrides(flags));
+  const holder = await inspectPort(config.host, config.port);
+
+  if (holder.state === 'free') return true;
+
+  if (holder.state === 'foreign') {
+    line();
+    line(ui.red(`  Something else is already using ${config.host}:${config.port}.`));
+    line(`  It does not answer as Mirante, so it will not be stopped.`);
+    line(`  Free the port, or choose another with ${ui.cyan('--port')}.`);
+    return false;
+  }
+
+  const pid = holder.pid ?? readPidFile(config.pidPath);
+  line(`  ${ui.dim(`A Mirante daemon is already running on ${config.port}. Stopping it…`)}`);
+  const stopped = await stopDaemon(pid, config.host, config.port);
+  if (!stopped) {
+    line();
+    line(ui.red(`  Could not stop the daemon on ${config.port}${pid ? ` (pid ${pid})` : ''}.`));
+    line(`  Stop it by hand, or choose another port with ${ui.cyan('--port')}.`);
+    return false;
+  }
+  removePidFile(config.pidPath);
+  return true;
+};
+
+const runStop = async (flags: Map<string, string | boolean>): Promise<number> => {
+  const config = loadConfig(configOverrides(flags));
+  const holder = await inspectPort(config.host, config.port);
+
+  if (holder.state === 'free') {
+    line(`\n  Nothing is running on ${config.host}:${config.port}.`);
+    removePidFile(config.pidPath);
+    return 0;
+  }
+  if (holder.state === 'foreign') {
+    line(`\n  ${ui.red(`Something on ${config.port} is not Mirante. Leaving it alone.`)}`);
+    return 1;
+  }
+
+  const pid = holder.pid ?? readPidFile(config.pidPath);
+  const stopped = await stopDaemon(pid, config.host, config.port);
+  removePidFile(config.pidPath);
+  line(stopped ? `\n  ${ui.green('Stopped.')}` : `\n  ${ui.red('Could not stop it.')}`);
+  return stopped ? 0 : 1;
+};
+
 const runStart = async (flags: Map<string, string | boolean>): Promise<number> => {
+  if (!(await claimPort(flags))) return 1;
   const webRoot = findWebRoot();
   const startOptions = {
     config: configOverrides(flags),
@@ -147,7 +213,9 @@ const runStart = async (flags: Map<string, string | boolean>): Promise<number> =
   line(`  ${ui.dim('Open Claude Code in your terminal or VS Code — the board fills itself.')}`);
   line(`  ${ui.dim('Ctrl+C to stop. Nothing leaves this machine.')}`);
 
+  const config = loadConfig(configOverrides(flags));
   const shutdown = () => {
+    removePidFile(config.pidPath);
     void daemon.close().then(() => process.exit(0));
   };
   process.on('SIGINT', shutdown);
@@ -175,6 +243,9 @@ const main = async (): Promise<void> => {
       return;
     case 'purge':
       process.exitCode = runPurge(flags);
+      return;
+    case 'stop':
+      process.exitCode = await runStop(flags);
       return;
     case 'start':
       process.exitCode = await runStart(flags);

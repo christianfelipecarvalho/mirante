@@ -1,5 +1,5 @@
 import type { MiranteEvent, PlanUsage, TokenUsage } from '@mirante/shared';
-import { addTokenUsage, emptyTokenUsage } from '@mirante/shared';
+import { addTokenUsage, emptyTokenUsage, isInjectedMessage } from '@mirante/shared';
 
 /**
  * One request: everything that happened because a person asked for something.
@@ -61,7 +61,9 @@ export const buildTurns = (events: MiranteEvent[], sessionId: string): Turn[] =>
     const turn = ensure(event);
     switch (event.kind) {
       case 'prompt.submitted':
-        turn.prompt = event.payload.preview;
+        // The daemon stops recording these, but its log is append-only: anything
+        // captured before that rule existed is still here.
+        if (!isInjectedMessage(event.payload.preview)) turn.prompt = event.payload.preview;
         break;
       case 'agent.started':
         turn.agentsSpawned += 1;
@@ -101,7 +103,9 @@ export const buildTurns = (events: MiranteEvent[], sessionId: string): Turn[] =>
 export const latestTurn = (
   events: MiranteEvent[],
 ): { turn: Turn; sessionId: string } | undefined => {
-  const prompts = events.filter((event) => event.kind === 'prompt.submitted');
+  const prompts = events.filter(
+    (event) => event.kind === 'prompt.submitted' && !isInjectedMessage(event.payload.preview),
+  );
   const last = prompts.at(-1);
   if (!last) return undefined;
   const turn = buildTurns(events, last.sessionId).find(

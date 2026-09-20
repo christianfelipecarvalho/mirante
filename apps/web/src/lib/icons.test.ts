@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentIcon } from './icons.js';
+import { agentIcon, UNKNOWN_GLYPH } from './icons.js';
 
 describe('agent icons', () => {
   it('reads the most specific part of a compound name', () => {
@@ -27,5 +27,15 @@ describe('agent icons', () => {
 
   it('honours an override', () => {
     expect(agentIcon('explore', 'a1', { explore: '✹' })).toBe('✹');
+  });
+});
+
+describe('an agent with no type', () => {
+  it('gets a placeholder instead of a hashed identity', () => {
+    expect(agentIcon(undefined, 'aff548777a6545ab3')).toBe(UNKNOWN_GLYPH);
+  });
+
+  it('does not affect the session card, which is identified', () => {
+    expect(agentIcon(undefined, 'main')).not.toBe(UNKNOWN_GLYPH);
   });
 });

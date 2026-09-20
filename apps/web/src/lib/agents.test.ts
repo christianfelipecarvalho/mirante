@@ -52,3 +52,11 @@ describe('an agent that declared its own colour', () => {
     expect(definitionColor(undefined)).toBeUndefined();
   });
 });
+
+describe('an agent Mirante only saw finish', () => {
+  it('is not passed off as a custom agent', () => {
+    // Only its SubagentStop arrived — the daemon was not running when it
+    // started. Saying it came from .claude/agents would invent a fact.
+    expect(agentRoleKey(card('aff54877'))).toBe('role.unknown');
+  });
+});

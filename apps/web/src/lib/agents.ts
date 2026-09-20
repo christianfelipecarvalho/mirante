@@ -20,8 +20,11 @@ const ROLE_KEYS: Record<string, string> = {
 
 export const agentRoleKey = (card: Pick<AgentCard, 'agentId' | 'agentType'>): string => {
   if (card.agentId === 'main') return 'role.session';
-  const type = card.agentType ?? '';
-  return ROLE_KEYS[type] ?? 'role.custom';
+  // No type at all means the agent was already running before Mirante saw it —
+  // typically only its SubagentStop arrived. Claiming it came from
+  // `.claude/agents` would be inventing a fact.
+  if (!card.agentType) return 'role.unknown';
+  return ROLE_KEYS[card.agentType] ?? 'role.custom';
 };
 
 /**

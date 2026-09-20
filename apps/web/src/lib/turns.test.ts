@@ -207,3 +207,50 @@ describe('the same action reported twice', () => {
     expect(steps).toHaveLength(2);
   });
 });
+
+describe('machine chatter already in the log', () => {
+  // The daemon stops recording these, but its log is append-only: everything
+  // captured before that rule existed is still there, and a purge is a worse
+  // answer than filtering on read.
+  const injected = (preview: string) =>
+    ev({
+      kind: 'prompt.submitted',
+      promptId: 'p9',
+      payload: { preview, charCount: preview.length },
+    });
+
+  it('is not shown as the text of a request', () => {
+    const turns = buildTurns([injected('<task-notification> <task-id>abc</task-id>')], 'sess-1');
+    expect(turns[0]?.prompt).toBe('');
+  });
+
+  it('is not picked as the latest request', () => {
+    const events = [
+      ev({
+        kind: 'prompt.submitted',
+        promptId: 'p1',
+        payload: { preview: 'real one', charCount: 8 },
+      }),
+      injected('<agent-message from="a1"> [Subagent hand-back]'),
+    ];
+    expect(latestTurn(events)?.turn.prompt).toBe('real one');
+  });
+
+  it('does not become a step in the activity stream', () => {
+    const steps = buildSteps([injected('<system-reminder> do the thing')], { sessionId: 'sess-1' });
+    expect(steps.filter((step) => step.kind === 'prompt')).toEqual([]);
+  });
+
+  it('leaves a real prompt that merely mentions a tag alone', () => {
+    const steps = buildSteps(
+      [
+        ev({
+          kind: 'prompt.submitted',
+          payload: { preview: 'explain <system-reminder> to me', charCount: 30 },
+        }),
+      ],
+      { sessionId: 'sess-1' },
+    );
+    expect(steps).toHaveLength(1);
+  });
+});

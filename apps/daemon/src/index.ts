@@ -1,4 +1,5 @@
 import { loadConfig, loadOrCreateToken, type MiranteConfig } from './config.js';
+import { writePidFile } from './core/takeover.js';
 import { createDaemon, type Daemon, type DaemonOptions } from './server/index.js';
 
 export { loadConfig, loadOrCreateToken, readToken } from './config.js';
@@ -14,6 +15,15 @@ export { parseSessionTranscript, normalizeEntrypoint } from './ingest/transcript
 export { locateSessions, locateSession } from './ingest/transcript/locate.js';
 export { TranscriptWatcher } from './ingest/transcript/watcher.js';
 export { createDaemon } from './server/index.js';
+export {
+  inspectPort,
+  stopDaemon,
+  waitForPortFree,
+  readPidFile,
+  writePidFile,
+  removePidFile,
+} from './core/takeover.js';
+export type { PortHolder } from './core/takeover.js';
 export { authorize, allowedOrigins } from './server/auth.js';
 export type { Daemon, DaemonOptions } from './server/index.js';
 
@@ -38,5 +48,6 @@ export const start = async (
   };
   const daemon = createDaemon(daemonOptions);
   await daemon.listen();
+  writePidFile(config.pidPath);
   return { daemon, url: `http://${config.host}:${config.port}`, token };
 };

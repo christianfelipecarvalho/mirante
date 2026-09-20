@@ -6,4 +6,5 @@ export * from './kinds.js';
 export * from './payloads.js';
 export * from './projector.js';
 export * from './state.js';
+export * from './text.js';
 export * from './usage.js';

@@ -58,11 +58,17 @@ const hash = (value: string): number => {
   return Math.abs(h);
 };
 
+/** An agent we only ever saw finish: honest about being unidentified. */
+export const UNKNOWN_GLYPH = '◌';
+
 export const agentIcon = (
   agentType: string | undefined,
   agentId: string,
   overrides: Record<string, string> = {},
 ): string => {
+  // Hashing an opaque id into a glyph would imply an identity Mirante does not
+  // have. A placeholder says what is true: this one is unidentified.
+  if (!agentType && agentId !== 'main') return UNKNOWN_GLYPH;
   const key = (agentType ?? agentId).toLowerCase();
   if (overrides[key]) return overrides[key] as string;
   if (KNOWN[key]) return KNOWN[key] as string;

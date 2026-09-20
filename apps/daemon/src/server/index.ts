@@ -80,7 +80,14 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
     return false;
   };
 
-  app.get('/health', async () => ({ ok: true, events: log.count() }));
+  // `service` is what lets a later run tell "a previous Mirante" apart from
+  // "something else of yours on this port" — and only the first may be stopped.
+  app.get('/health', async () => ({
+    ok: true,
+    service: 'mirante',
+    pid: process.pid,
+    events: log.count(),
+  }));
 
   /**
    * Hook ingest.

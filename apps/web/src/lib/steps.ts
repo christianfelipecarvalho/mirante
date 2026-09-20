@@ -1,4 +1,4 @@
-import { sourceOutranks, type MiranteEvent } from '@mirante/shared';
+import { isInjectedMessage, sourceOutranks, type MiranteEvent } from '@mirante/shared';
 
 /**
  * One readable line of what an agent did.
@@ -97,6 +97,7 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
   for (const event of relevant) {
     switch (event.kind) {
       case 'prompt.submitted':
+        if (isInjectedMessage(event.payload.preview)) break;
         steps.push({
           ...base(event),
           kind: 'prompt',

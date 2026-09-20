@@ -1,5 +1,5 @@
 import type { DraftEvent, Entrypoint } from '@mirante/shared';
-import { MAIN_AGENT_ID, dedupeKeys } from '@mirante/shared';
+import { MAIN_AGENT_ID, dedupeKeys, isInjectedMessage } from '@mirante/shared';
 import { preview, summarizeToolInput } from '../../core/redact.js';
 import {
   agentToolResultSchema,
@@ -78,30 +78,6 @@ const normalizeUsage = (usage: NonNullable<TranscriptEntry['message']>['usage'])
     ? {}
     : { thinking: usage.output_tokens_details.thinking_tokens }),
 });
-
-/**
- * Markers Claude Code uses for messages it writes to itself — a subagent handing
- * work back, a task notification, a reminder injected into the turn.
- *
- * These arrive as ordinary `type: "user"` entries with string content, so
- * nothing but the content distinguishes them from something a person typed.
- * Counting them as requests fills the board with machine chatter and makes the
- * request list useless.
- */
-const INJECTED_PREFIXES = [
-  '<task-notification>',
-  '<agent-message',
-  '<system-reminder>',
-  '<local-command-',
-  '<command-name>',
-  '[Subagent hand-back]',
-  '<user-prompt-submit-hook>',
-];
-
-const isInjectedMessage = (text: string): boolean => {
-  const head = text.trimStart();
-  return INJECTED_PREFIXES.some((prefix) => head.startsWith(prefix));
-};
 
 /**
  * A user entry is a real human prompt only when it is not a tool result, not an

@@ -70,6 +70,7 @@ const en = {
   'role.setup': 'configures the status line',
   'role.guide': 'answers questions about Claude Code',
   'role.custom': 'custom agent from .claude/agents',
+  'role.unknown': 'started before Mirante was watching',
 
   'card.session': 'Session',
   'card.subagent': 'subagent',
@@ -114,6 +115,7 @@ const en = {
   'activity.spawned': 'spawned',
   'activity.returned': 'returned',
   'detail.request': 'Request',
+  'detail.request.noText': 'Request — its prompt was not captured',
   'detail.requestAt': 'sent {time}',
   'detail.agentsSpawned': 'Agents',
   'detail.toolsRun': 'Tools',
@@ -209,6 +211,7 @@ const ptBR: Record<Key, string> = {
   'role.setup': 'configura a status line',
   'role.guide': 'responde dúvidas sobre o Claude Code',
   'role.custom': 'agente próprio, de .claude/agents',
+  'role.unknown': 'começou antes do Mirante estar observando',
 
   'card.session': 'Sessão',
   'card.subagent': 'subagente',
@@ -253,6 +256,7 @@ const ptBR: Record<Key, string> = {
   'activity.spawned': 'iniciou',
   'activity.returned': 'retornou',
   'detail.request': 'Solicitação',
+  'detail.request.noText': 'Solicitação — o texto dela não foi capturado',
   'detail.requestAt': 'enviada {time}',
   'detail.agentsSpawned': 'Agentes',
   'detail.toolsRun': 'Ferramentas',

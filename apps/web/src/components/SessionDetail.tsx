@@ -267,8 +267,16 @@ const TurnRow = ({ turn }: { turn: Turn }) => {
         <span aria-hidden="true" className="mt-[2px] text-[13px] text-[var(--text-muted)]">
           ›
         </span>
-        <p className="min-w-0 flex-1 text-[13px] text-[var(--text-primary)]">
-          {turn.prompt || t('detail.request')}
+        {/*
+          A turn whose prompt was never captured — because Mirante started
+          watching mid-session — can still hold real work. Say so rather than
+          hiding it or labelling it as if the text were there.
+        */}
+        <p
+          className="min-w-0 flex-1 text-[13px]"
+          style={{ color: turn.prompt ? 'var(--text-primary)' : 'var(--text-muted)' }}
+        >
+          {turn.prompt || t('detail.request.noText')}
         </p>
         {turn.open && <StateBadge status={{ state: 'thinking' }} />}
       </header>
