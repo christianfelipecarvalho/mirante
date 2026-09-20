@@ -12,7 +12,13 @@
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly"
   },
   "dependencies": {
+    "@fastify/websocket": "^11.3.1",
     "@mirante/shared": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "fastify": "^5.12.5",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
   }
 }

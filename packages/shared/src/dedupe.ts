@@ -1,4 +1,5 @@
 import type { DraftEvent } from './event.js';
+import type { EventSource } from './kinds.js';
 
 /**
  * Builders for `dedupeKey`.
@@ -30,7 +31,7 @@ export const dedupeKeys = {
  * overwrites a hook's version of the same fact. Hooks still matter: they arrive
  * first, and the board should not sit empty waiting for a file flush.
  */
-const SOURCE_PRECEDENCE: Record<DraftEvent['source'], number> = {
+const SOURCE_PRECEDENCE: Record<EventSource, number> = {
   transcript: 40,
   sdk: 30,
   otel: 20,
@@ -38,5 +39,8 @@ const SOURCE_PRECEDENCE: Record<DraftEvent['source'], number> = {
   hook: 10,
 };
 
+export const sourceOutranks = (incoming: EventSource, existing: EventSource): boolean =>
+  SOURCE_PRECEDENCE[incoming] > SOURCE_PRECEDENCE[existing];
+
 export const shouldSupersede = (incoming: DraftEvent, existing: DraftEvent): boolean =>
-  SOURCE_PRECEDENCE[incoming.source] > SOURCE_PRECEDENCE[existing.source];
+  sourceOutranks(incoming.source, existing.source);

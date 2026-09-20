@@ -2,8 +2,8 @@ packages:
   - 'packages/*'
   - 'apps/*'
 
+# Native and platform binaries this project trusts to run install scripts.
+# better-sqlite3 compiles (or downloads) a native addon; esbuild fetches its binary.
 allowBuilds:
-  esbuild: set this to true or false
-
-onlyBuiltDependencies:
-  - esbuild
+  better-sqlite3: true
+  esbuild: true
