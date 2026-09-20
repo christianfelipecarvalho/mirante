@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { EventLog, loadConfig, readToken, type MiranteConfig } from '@mirante/daemon';
 import { locateSessions } from '@mirante/daemon';
 import { readManifest, readSettings } from '@mirante/installer';
@@ -158,25 +159,37 @@ export const doctor = async (overrides: Partial<MiranteConfig> = {}): Promise<nu
       if (statusLineEvents > 0) {
         check('pass', 'Status line reporting', `${statusLineEvents} events`);
       } else {
-        // The status line is a terminal-interface feature. Sessions running in an
-        // editor extension never invoke it, so plan usage and cost cannot arrive
-        // from them — which looks exactly like a broken install unless it is
-        // spelled out here.
+        // Three different failures look identical from here, so separate them:
+        // Claude Code never called the status line, it called it while the daemon
+        // was down, or no terminal session has run at all.
+        const heartbeat = join(config.home, 'statusline-last-run');
+        const lastRun = existsSync(heartbeat) ? readFileSync(heartbeat, 'utf8').trim() : undefined;
         const entrypoints = new Set(
           events
             .filter((event) => event.kind === 'session.started')
             .map((event) => (event.payload as { entrypoint?: string }).entrypoint),
         );
-        const onlyEditor = entrypoints.size > 0 && !entrypoints.has('cli');
-        check(
-          'warn',
-          'Status line reporting',
-          onlyEditor
-            ? '0 events — every session seen so far runs in an editor, and the status line runs in the terminal'
-            : '0 events — open a terminal session, or check that `mirante install` ran',
-        );
-        if (onlyEditor) {
+
+        if (lastRun) {
+          check(
+            'warn',
+            'Status line reporting',
+            `0 events, but the status line last ran at ${lastRun} — the daemon was not listening then`,
+          );
+          check('info', 'Fix', 'leave `mirante` running, then use a terminal session');
+        } else if (!entrypoints.has('cli')) {
+          check(
+            'warn',
+            'Status line reporting',
+            '0 events — every session seen so far runs in an editor, and the status line runs in the terminal',
+          );
           check('info', 'To get plan usage and cost', 'run `claude` in a terminal at least once');
+        } else {
+          check(
+            'warn',
+            'Status line reporting',
+            '0 events — a terminal session ran but never invoked the status line; check `mirante install`',
+          );
         }
       }
 

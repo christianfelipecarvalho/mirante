@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -130,5 +131,38 @@ describe('installing twice', () => {
 
     uninstall(paths);
     expect(JSON.parse(readFileSync(settingsPath, 'utf8'))).toEqual(original);
+  });
+});
+
+describe('the status line heartbeat', () => {
+  it('records that it ran even when the daemon is unreachable', () => {
+    // From the daemon's side, "Claude Code never called the status line" and
+    // "it called it while nothing was listening" look identical. The heartbeat
+    // is what tells them apart.
+    const { paths } = workspace({});
+    install({ ...options(paths), daemonUrl: 'http://127.0.0.1:59999' });
+
+    const wrapper = join(paths.mirantehome, 'statusline.mjs');
+    const result = spawnSync(process.execPath, [wrapper], {
+      input: JSON.stringify({ session_id: 's1', model: { display_name: 'Opus' } }),
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(0);
+    const heartbeat = join(paths.mirantehome, 'statusline-last-run');
+    expect(existsSync(heartbeat)).toBe(true);
+    expect(readFileSync(heartbeat, 'utf8')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('still prints the status line with nothing listening', () => {
+    const { paths } = workspace({});
+    install({ ...options(paths), daemonUrl: 'http://127.0.0.1:59999' });
+    const result = spawnSync(process.execPath, [join(paths.mirantehome, 'statusline.mjs')], {
+      input: JSON.stringify({ session_id: 's1', model: { display_name: 'Opus' } }),
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    expect(result.stdout).toContain('Opus');
   });
 });

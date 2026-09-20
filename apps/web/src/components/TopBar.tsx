@@ -3,6 +3,7 @@ import { addTokenUsage, emptyTokenUsage } from '@mirante/shared';
 import type { Connection } from '../lib/client';
 import { formatCost, formatTokens } from '../lib/format';
 import { LOCALES, LOCALE_LABEL, useI18n } from '../lib/i18n';
+import { THEMES, useTheme, type Theme } from '../lib/theme';
 import { Meter } from './Meter';
 import { StatTile } from './StatTile';
 
@@ -31,6 +32,7 @@ const planHintKey = (
 
 export const TopBar = ({ board, connection }: { board: BoardState; connection: Connection }) => {
   const { t, locale, setLocale } = useI18n();
+  const { theme, setTheme } = useTheme();
   const active = board.sessions.filter((session) => !session.endedAt);
   const tokens = board.sessions
     .map((session) => session.tokens)
@@ -120,21 +122,44 @@ export const TopBar = ({ board, connection }: { board: BoardState; connection: C
         )}
       </div>
 
-      <div className="flex items-center gap-1" role="group" aria-label="Language">
-        {LOCALES.map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => setLocale(option)}
-            className="rounded px-2 py-1 text-[11px] font-medium transition-colors"
-            style={{
-              background: locale === option ? 'var(--surface-1)' : 'transparent',
-              color: locale === option ? 'var(--text-primary)' : 'var(--text-muted)',
-            }}
-          >
-            {LOCALE_LABEL[option]}
-          </button>
-        ))}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1" role="group" aria-label={t('theme.label')}>
+          {THEMES.map((option: Theme) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setTheme(option)}
+              title={t('theme.label')}
+              className="rounded px-2 py-1 text-[11px] font-medium transition-colors"
+              style={{
+                background: theme === option ? 'var(--surface-1)' : 'transparent',
+                color: theme === option ? 'var(--text-primary)' : 'var(--text-muted)',
+              }}
+            >
+              {t(`theme.${option}` as 'theme.auto')}
+            </button>
+          ))}
+        </div>
+
+        <div className="h-4 w-px" style={{ background: 'var(--hairline)' }} aria-hidden="true" />
+
+        <div className="flex items-center gap-1" role="group" aria-label={t('lang.label')}>
+          {LOCALES.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setLocale(option)}
+              title={t('lang.label')}
+              className="rounded px-2 py-1 text-[11px] font-medium transition-colors"
+              style={{
+                background: locale === option ? 'var(--surface-1)' : 'transparent',
+                color: locale === option ? 'var(--text-primary)' : 'var(--text-muted)',
+              }}
+            >
+              {LOCALE_LABEL[option]}
+            </button>
+          ))}
+        </div>
       </div>
     </header>
   );

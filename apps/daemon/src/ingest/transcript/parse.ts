@@ -80,15 +80,41 @@ const normalizeUsage = (usage: NonNullable<TranscriptEntry['message']>['usage'])
 });
 
 /**
- * A user entry is a real human prompt only when it is not a tool result and not
- * an injected meta message. Both of those are also `type: "user"`, so the type
- * alone tells you nothing.
+ * Markers Claude Code uses for messages it writes to itself — a subagent handing
+ * work back, a task notification, a reminder injected into the turn.
+ *
+ * These arrive as ordinary `type: "user"` entries with string content, so
+ * nothing but the content distinguishes them from something a person typed.
+ * Counting them as requests fills the board with machine chatter and makes the
+ * request list useless.
  */
-const isHumanPrompt = (entry: TranscriptEntry): boolean =>
-  entry.type === 'user' &&
-  entry.isMeta !== true &&
-  entry.toolUseResult === undefined &&
-  !contentBlocks(entry).some((b) => b.type === 'tool_result');
+const INJECTED_PREFIXES = [
+  '<task-notification>',
+  '<agent-message',
+  '<system-reminder>',
+  '<local-command-',
+  '<command-name>',
+  '[Subagent hand-back]',
+  '<user-prompt-submit-hook>',
+];
+
+const isInjectedMessage = (text: string): boolean => {
+  const head = text.trimStart();
+  return INJECTED_PREFIXES.some((prefix) => head.startsWith(prefix));
+};
+
+/**
+ * A user entry is a real human prompt only when it is not a tool result, not an
+ * injected meta message, and not something Claude Code wrote to itself. All of
+ * those are also `type: "user"`, so the type alone tells you nothing.
+ */
+const isHumanPrompt = (entry: TranscriptEntry): boolean => {
+  if (entry.type !== 'user' || entry.isMeta === true || entry.toolUseResult !== undefined) {
+    return false;
+  }
+  if (contentBlocks(entry).some((b) => b.type === 'tool_result')) return false;
+  return !isInjectedMessage(promptText(entry));
+};
 
 const promptText = (entry: TranscriptEntry): string => {
   const content = entry.message?.content;

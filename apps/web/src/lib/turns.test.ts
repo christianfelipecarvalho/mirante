@@ -161,3 +161,49 @@ describe('turning the stream into readable steps', () => {
     expect(one.every((step) => step.agentId === 'a1')).toBe(true);
   });
 });
+
+describe('the same action reported twice', () => {
+  // A hook sees a tool call first and the transcript describes it properly. The
+  // log keeps both on purpose; anything reading raw events has to fold them or
+  // every action appears twice on screen.
+  const pair = (source: MiranteEvent['source'], summary: string): MiranteEvent =>
+    ev({
+      kind: 'tool.started',
+      source,
+      dedupeKey: 'tool.started:toolu_dup',
+      payload: { toolUseId: 'toolu_dup', toolName: 'Bash', summary },
+    });
+
+  it('is listed once', () => {
+    const steps = buildSteps([pair('hook', 'from hook'), pair('transcript', 'from transcript')], {
+      sessionId: 'sess-1',
+    });
+    expect(steps).toHaveLength(1);
+  });
+
+  it('keeps the better-sourced description, whichever arrived first', () => {
+    const hookFirst = buildSteps(
+      [pair('hook', 'from hook'), pair('transcript', 'from transcript')],
+      {
+        sessionId: 'sess-1',
+      },
+    );
+    const transcriptFirst = buildSteps(
+      [pair('transcript', 'from transcript'), pair('hook', 'from hook')],
+      { sessionId: 'sess-1' },
+    );
+    expect(hookFirst[0]?.detail).toBe('from transcript');
+    expect(transcriptFirst[0]?.detail).toBe('from transcript');
+  });
+
+  it('leaves events with no shared identity alone', () => {
+    const steps = buildSteps(
+      [
+        ev({ kind: 'skill.invoked', payload: { skillName: 'review' } }),
+        ev({ kind: 'skill.invoked', payload: { skillName: 'review' } }),
+      ],
+      { sessionId: 'sess-1' },
+    );
+    expect(steps).toHaveLength(2);
+  });
+});

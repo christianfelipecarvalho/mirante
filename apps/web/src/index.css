@@ -30,6 +30,21 @@
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
+
+  /*
+   * Agent identity, in fixed order. Light and dark are separate steps of the
+   * same hues, chosen for their own surface — not one set dimmed for the other.
+   * Declared here so the theme swap needs no JavaScript.
+   */
+  --agent-1: #3987e5;
+  --agent-2: #d95926;
+  --agent-3: #199e70;
+  --agent-4: #c98500;
+  --agent-5: #d55181;
+  --agent-6: #008300;
+  --agent-7: #9085e9;
+  --agent-8: #e66767;
+  --agent-neutral: #898781;
 }
 
 :root[data-theme='light'] {
@@ -50,6 +65,16 @@
   --accent: #2a78d6;
   --accent-dim: #86b6ef;
   --accent-track: #cde2fb;
+
+  --agent-1: #2a78d6;
+  --agent-2: #eb6834;
+  --agent-3: #1baf7a;
+  --agent-4: #eda100;
+  --agent-5: #e87ba4;
+  --agent-6: #008300;
+  --agent-7: #4a3aa7;
+  --agent-8: #e34948;
+  --agent-neutral: #898781;
 }
 
 html,

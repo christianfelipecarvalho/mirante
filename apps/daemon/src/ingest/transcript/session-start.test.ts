@@ -104,3 +104,19 @@ describe('attributing work to the request that caused it', () => {
     expect(sameTurn.length).toBeGreaterThan(1);
   });
 });
+
+describe('messages Claude Code writes to itself', () => {
+  it('are not counted as requests from a person', () => {
+    // Subagent hand-backs and task notifications arrive as ordinary `type: "user"`
+    // entries with string content. Counted as requests, they bury the real ones.
+    const prompts = events.filter(
+      (event): event is MiranteEventOf<'prompt.submitted'> => event.kind === 'prompt.submitted',
+    );
+    const injected = prompts.filter((event) =>
+      /^\s*(<task-notification>|<agent-message|<system-reminder>|\[Subagent hand-back\])/.test(
+        event.payload.preview,
+      ),
+    );
+    expect(injected).toEqual([]);
+  });
+});

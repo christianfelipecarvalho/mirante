@@ -1,4 +1,4 @@
-import type { MiranteEvent } from '@mirante/shared';
+import { sourceOutranks, type MiranteEvent } from '@mirante/shared';
 
 /**
  * One readable line of what an agent did.
@@ -25,6 +25,11 @@ export type Step = {
   durationMs?: number;
   agentId: string;
   agentType?: string;
+  /**
+   * What happened, for rows whose title would otherwise repeat the agent column.
+   * Rendered in the reader's language rather than baked into the title.
+   */
+  verb?: 'spawned' | 'returned';
 };
 
 const durationBetween = (from: string, to: string): number | undefined => {
@@ -40,12 +45,42 @@ export type StepFilter = {
   promptId?: string | undefined;
 };
 
+/**
+ * Collapses the two reports of one fact into the better one.
+ *
+ * A tool call is recorded twice on purpose — a hook sees it first, the
+ * transcript describes it properly — and the log keeps both because it is an
+ * audit trail. The board's projector already folds them; anything reading raw
+ * events has to do the same or every action is listed twice.
+ */
+const dedupe = (events: MiranteEvent[]): MiranteEvent[] => {
+  const winners = new Map<string, MiranteEvent>();
+  const passthrough: MiranteEvent[] = [];
+
+  for (const event of events) {
+    if (!event.dedupeKey) {
+      passthrough.push(event);
+      continue;
+    }
+    const existing = winners.get(event.dedupeKey);
+    if (!existing || sourceOutranks(event.source, existing.source)) {
+      winners.set(event.dedupeKey, event);
+    }
+  }
+
+  return [...passthrough, ...winners.values()].sort(
+    (a, b) => a.ts.localeCompare(b.ts) || a.id - b.id,
+  );
+};
+
 export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] => {
-  const relevant = events.filter(
-    (event) =>
-      event.sessionId === filter.sessionId &&
-      (filter.agentId === undefined || event.agentId === filter.agentId) &&
-      (filter.promptId === undefined || event.promptId === filter.promptId),
+  const relevant = dedupe(
+    events.filter(
+      (event) =>
+        event.sessionId === filter.sessionId &&
+        (filter.agentId === undefined || event.agentId === filter.agentId) &&
+        (filter.promptId === undefined || event.promptId === filter.promptId),
+    ),
   );
 
   const steps: Step[] = [];
@@ -119,6 +154,7 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
         steps.push({
           ...base(event),
           kind: 'agent',
+          verb: 'spawned',
           title: event.payload.agentType,
           ...(event.payload.description ? { detail: event.payload.description } : {}),
           status: 'running',
@@ -129,6 +165,7 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
         steps.push({
           ...base(event),
           kind: 'agent',
+          verb: 'returned',
           title: event.agentType ?? event.agentId,
           status: event.payload.outcome === 'error' ? 'failed' : 'ok',
         });

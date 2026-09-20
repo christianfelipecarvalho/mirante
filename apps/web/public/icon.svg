@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Mirante">
+  <title>Mirante</title>
+  <rect width="32" height="32" rx="7" fill="#12213a" />
+  <g fill="none" stroke="#5f9ff0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12.4 15.5 L9.8 26" />
+    <path d="M19.6 15.5 L22.2 26" />
+    <path d="M11 21 L21 21" />
+  </g>
+  <path d="M7.5 12 h17 l-3.2 3.6 H10.7 Z" fill="#5f9ff0" />
+  <circle cx="16" cy="7" r="2.4" fill="#5f9ff0" />
+</svg>

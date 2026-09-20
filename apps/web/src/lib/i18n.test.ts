@@ -70,6 +70,7 @@ describe('the two dictionaries stay in step', () => {
             'stat.tokens',
             'card.tokens',
             'lane.context',
+            'theme.auto',
           ].includes(key),
       );
     expect(identical.map(([key]) => key)).toEqual([]);

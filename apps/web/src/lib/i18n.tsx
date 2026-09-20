@@ -10,6 +10,12 @@ type Vars = Record<string, string | number>;
 const en = {
   'brand.tagline': 'Local lookout for coding agents',
 
+  'theme.auto': 'Auto',
+  'theme.dark': 'Dark',
+  'theme.light': 'Light',
+  'theme.label': 'Theme',
+  'lang.label': 'Language',
+
   'conn.connecting': 'Connecting',
   'conn.live': 'Live',
   'conn.offline': 'Daemon offline',
@@ -94,6 +100,8 @@ const en = {
   'detail.agents.empty': 'No subagents were spawned in this session.',
   'detail.requests.empty': 'No requests recorded yet.',
   'detail.allAgents': 'All agents',
+  'activity.spawned': 'spawned',
+  'activity.returned': 'returned',
   'detail.request': 'Request',
   'detail.requestAt': 'sent {time}',
   'detail.agentsSpawned': 'Agents',
@@ -129,6 +137,12 @@ type Key = keyof typeof en;
 
 const ptBR: Record<Key, string> = {
   'brand.tagline': 'Mirante local para agentes de código',
+
+  'theme.auto': 'Auto',
+  'theme.dark': 'Escuro',
+  'theme.light': 'Claro',
+  'theme.label': 'Tema',
+  'lang.label': 'Idioma',
 
   'conn.connecting': 'Conectando',
   'conn.live': 'Ao vivo',
@@ -214,6 +228,8 @@ const ptBR: Record<Key, string> = {
   'detail.agents.empty': 'Nenhum subagente foi criado nesta sessão.',
   'detail.requests.empty': 'Nenhuma solicitação registrada ainda.',
   'detail.allAgents': 'Todos os agentes',
+  'activity.spawned': 'iniciou',
+  'activity.returned': 'retornou',
   'detail.request': 'Solicitação',
   'detail.requestAt': 'enviada {time}',
   'detail.agentsSpawned': 'Agentes',

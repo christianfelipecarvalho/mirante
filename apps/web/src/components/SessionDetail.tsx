@@ -120,11 +120,11 @@ export const SessionDetail = ({
       </header>
 
       <div
-        className="min-h-0 flex-1 overflow-y-auto rounded-xl border"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
         style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
       >
         {tab === 'agents' && (
-          <div className="space-y-3 p-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
             {root && (
               <AgentCardView
                 card={root}
@@ -160,10 +160,10 @@ export const SessionDetail = ({
         )}
 
         {tab === 'activity' && (
-          <div className="flex min-h-0 flex-col">
-            {/* Agent picker: which stream you are reading. */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* Agent picker stays put; only the stream under it scrolls. */}
             <div
-              className="flex flex-wrap gap-1.5 border-b px-3 py-2"
+              className="flex shrink-0 flex-wrap gap-1.5 border-b px-3 py-2"
               style={{ borderColor: 'var(--hairline)' }}
             >
               <AgentChip
@@ -188,12 +188,21 @@ export const SessionDetail = ({
                 />
               ))}
             </div>
-            <ActivityStream steps={steps} showAgent={agentId === undefined} />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <ActivityStream
+                steps={steps}
+                showAgent={agentId === undefined}
+                colorOf={(id) => {
+                  const index = lane.cards.findIndex((card) => card.agentId === id);
+                  return colorFor(index - 1, id === 'main');
+                }}
+              />
+            </div>
           </div>
         )}
 
         {tab === 'requests' && (
-          <div className="space-y-2 p-3">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
             {turns.length === 0 ? (
               <p className="px-1 py-6 text-center text-[12px] text-[var(--text-muted)]">
                 {t('detail.requests.empty')}
