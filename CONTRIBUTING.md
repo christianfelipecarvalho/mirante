@@ -4,7 +4,7 @@ Thanks for being here. Contributions are welcome from the first commit.
 
 ## Setup
 
-Requires Node 20.10+ and pnpm.
+Requires Node 22.13+ and pnpm. Node 20 reached end of life in April 2026 and is not supported.
 
 ```bash
 git clone https://github.com/christianfelipecarvalho/mirante.git
@@ -60,7 +60,7 @@ docs(event-map): record async subagent divergence
 
 Before opening a PR: run `pnpm check`, add a test for behavior you changed, and update `docs/EVENT_MAP.md` if you touched parsing.
 
-CI runs format, lint, typecheck, and tests on Node 20 and 22.
+CI runs format, lint, typecheck, and tests on Node 22 and 24.
 
 ## Good first issues
 
