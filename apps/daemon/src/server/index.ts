@@ -7,6 +7,7 @@ import { BoardProjector, type MiranteEvent } from '@mirante/shared';
 import type { MiranteConfig } from '../config.js';
 import { EventLog } from '../core/eventlog.js';
 import { PermissionBroker, permissionResponse } from '../core/permissions.js';
+import { loadAgentDefinitions } from '../ingest/agents.js';
 import { hookPayloadSchema, hookToEvents } from '../ingest/hooks.js';
 import { statusLinePayloadSchema, statusLineToEvents } from '../ingest/statusline.js';
 import { TranscriptWatcher } from '../ingest/transcript/watcher.js';
@@ -141,6 +142,17 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
   app.get('/api/state', async (request, reply) => {
     if (!guard(request, reply)) return;
     return reply.send(projector.snapshot());
+  });
+
+  /**
+   * Agent definitions, so the board can show an agent by the name and colour its
+   * author gave it. Read on request rather than cached: these files change while
+   * the daemon runs, and there are only ever a handful of them.
+   */
+  app.get('/api/agents', async (request, reply) => {
+    if (!guard(request, reply)) return;
+    const projects = [...new Set(projector.snapshot().sessions.map((s) => s.projectPath))];
+    return reply.send({ agents: loadAgentDefinitions(projects) });
   });
 
   app.get('/api/events', async (request, reply) => {

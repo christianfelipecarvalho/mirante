@@ -4,7 +4,7 @@ import { totalTokens } from '@mirante/shared';
 import { formatCost, formatDuration, formatTokens, formatWhen } from '../lib/format';
 import { agentIcon, agentLabel } from '../lib/icons';
 import { useI18n } from '../lib/i18n';
-import { agentOrdinals } from '../lib/agents';
+import { agentOrdinals, type AgentDefinition } from '../lib/agents';
 import { agentColor } from '../lib/palette';
 import { buildSteps } from '../lib/steps';
 import { buildTurns, type Turn } from '../lib/turns';
@@ -19,6 +19,7 @@ export type SessionDetailProps = {
   events: MiranteEvent[];
   approvals: BoardState['pendingApprovals'];
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
+  definitions: Map<string, AgentDefinition>;
   onClose: () => void;
 };
 
@@ -27,6 +28,7 @@ export const SessionDetail = ({
   events,
   approvals,
   onDecide,
+  definitions,
   onClose,
 }: SessionDetailProps) => {
   const { t } = useI18n();
@@ -150,6 +152,7 @@ export const SessionDetail = ({
                     card={card}
                     color={colorFor(index, false)}
                     ordinal={ordinals.get(card.agentId)}
+                    definition={card.agentType ? definitions.get(card.agentType) : undefined}
                     approval={approvals.find(
                       (a) => a.sessionId === lane.sessionId && a.agentId === card.agentId,
                     )}

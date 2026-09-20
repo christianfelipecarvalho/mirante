@@ -51,3 +51,34 @@ export const agentOrdinals = (cards: readonly AgentCard[]): Map<string, number> 
   }
   return ordinals;
 };
+
+/**
+ * A definition read from `.claude/agents/*.md`, as the daemon serves it.
+ */
+export type AgentDefinition = {
+  name: string;
+  description?: string;
+  color?: string;
+  model?: string;
+  scope: 'project' | 'user';
+};
+
+/**
+ * Claude Code's named agent colours, mapped onto the themed slots.
+ *
+ * An author who picked "purple" gets purple on both surfaces, because the slot
+ * resolves per theme — a raw hex from a definition would not.
+ */
+const NAMED_COLORS: Record<string, string> = {
+  blue: 'var(--agent-1)',
+  orange: 'var(--agent-2)',
+  cyan: 'var(--agent-3)',
+  yellow: 'var(--agent-4)',
+  pink: 'var(--agent-5)',
+  green: 'var(--agent-6)',
+  purple: 'var(--agent-7)',
+  red: 'var(--agent-8)',
+};
+
+export const definitionColor = (definition: AgentDefinition | undefined): string | undefined =>
+  definition?.color ? NAMED_COLORS[definition.color.toLowerCase()] : undefined;

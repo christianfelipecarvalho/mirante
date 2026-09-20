@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BoardProjector, emptyBoard, type BoardState, type MiranteEvent } from '@mirante/shared';
+import type { AgentDefinition } from './agents';
 
 /**
  * The token reaches the page through the URL the CLI prints, then lives in
@@ -40,6 +41,8 @@ export type BoardClient = {
    * round trip per click.
    */
   events: MiranteEvent[];
+  /** Agent definitions from `.claude/agents`, keyed by name. */
+  definitions: Map<string, AgentDefinition>;
   connection: Connection;
   decide: (requestId: string, behavior: 'allow' | 'deny') => Promise<boolean>;
 };
@@ -49,6 +52,7 @@ const RECONNECT_MS = 1500;
 export const useBoard = (): BoardClient => {
   const [board, setBoard] = useState<BoardState>(emptyBoard);
   const [events, setEvents] = useState<MiranteEvent[]>([]);
+  const [definitions, setDefinitions] = useState<Map<string, AgentDefinition>>(new Map());
   const [connection, setConnection] = useState<Connection>('connecting');
   const tokenRef = useRef<string>('');
   const projectorRef = useRef(new BoardProjector());
@@ -94,6 +98,20 @@ export const useBoard = (): BoardClient => {
         ready = true;
         applyEvents(buffered);
         buffered = [];
+
+        // Best effort: an agent without a definition still renders, it just uses
+        // Mirante's own glyph and colour.
+        try {
+          const response = await fetch('/api/agents', {
+            headers: { authorization: `Bearer ${token}` },
+          });
+          if (response.ok) {
+            const body = (await response.json()) as { agents: AgentDefinition[] };
+            setDefinitions(new Map(body.agents.map((agent) => [agent.name, agent])));
+          }
+        } catch {
+          // No definitions is a normal state, not a failure.
+        }
       } catch {
         if (!disposed) {
           setConnection('offline');
@@ -143,5 +161,5 @@ export const useBoard = (): BoardClient => {
     return body.accepted;
   };
 
-  return { board, events, connection, decide };
+  return { board, events, definitions, connection, decide };
 };

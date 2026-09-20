@@ -1,7 +1,7 @@
 import type { AgentCard as Card, PendingApproval, WaitingOn } from '@mirante/shared';
 import { isWaitingState } from '@mirante/shared';
 import { formatDuration, formatTokens, formatWaitingFor } from '../lib/format';
-import { agentRoleKey } from '../lib/agents';
+import { agentRoleKey, definitionColor, type AgentDefinition } from '../lib/agents';
 import { agentIcon, agentLabel } from '../lib/icons';
 import { useI18n, type Translate } from '../lib/i18n';
 import { StateBadge } from './StateBadge';
@@ -36,6 +36,8 @@ export type AgentCardProps = {
   color: string;
   /** Position among agents sharing a type, when there is more than one. */
   ordinal?: number | undefined;
+  /** The agent's own definition from `.claude/agents`, when it has one. */
+  definition?: AgentDefinition | undefined;
   approval?: PendingApproval | undefined;
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
   onOpen?: (() => void) | undefined;
@@ -44,14 +46,18 @@ export type AgentCardProps = {
 
 export const AgentCardView = ({
   card,
-  color,
+  color: assignedColor,
   ordinal,
+  definition,
   approval,
   onDecide,
   onOpen,
   iconOverrides,
 }: AgentCardProps) => {
   const { t } = useI18n();
+  // An author who gave their agent a colour gets it; the assigned slot is a
+  // fallback for agents that never declared one.
+  const color = definitionColor(definition) ?? assignedColor;
   const waiting = isWaitingState(card.status.state);
   const isRoot = card.agentId === 'main';
   const running = card.status.state === 'tool_running';
@@ -97,8 +103,11 @@ export const AgentCardView = ({
             )}
           </div>
           {/* What this agent is for, in words, because its type name rarely says. */}
-          <div className="truncate text-[10px] text-[var(--text-muted)]">
-            {t(agentRoleKey(card) as 'role.general')}
+          <div
+            className="truncate text-[10px] text-[var(--text-muted)]"
+            title={definition?.description}
+          >
+            {definition?.description ?? t(agentRoleKey(card) as 'role.general')}
           </div>
         </div>
 

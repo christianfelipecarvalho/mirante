@@ -24,7 +24,7 @@ const groupByProject = (sessions: SessionLane[]): [string, SessionLane[]][] => {
 };
 
 export const App = () => {
-  const { board, events, connection, decide } = useBoard();
+  const { board, events, definitions, connection, decide } = useBoard();
   const { t } = useI18n();
   const [project, setProject] = useState('all');
   const [hideFinished, setHideFinished] = useState(false);
@@ -70,6 +70,7 @@ export const App = () => {
           events={events}
           approvals={board.pendingApprovals}
           onDecide={onDecide}
+          definitions={definitions}
           onClose={() => setOpenSessionId(undefined)}
         />
       ) : (
@@ -127,6 +128,7 @@ export const App = () => {
                         lane={lane}
                         approvals={board.pendingApprovals}
                         onDecide={onDecide}
+                        definitions={definitions}
                         onOpen={() => setOpenSessionId(lane.sessionId)}
                       />
                     ))}

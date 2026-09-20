@@ -1,7 +1,7 @@
 import type { BoardState, SessionLane as Lane } from '@mirante/shared';
 import { formatCost, formatTokens } from '../lib/format';
 import { useI18n } from '../lib/i18n';
-import { agentOrdinals } from '../lib/agents';
+import { agentOrdinals, type AgentDefinition } from '../lib/agents';
 import { agentColor } from '../lib/palette';
 import { AgentCardView } from './AgentCard';
 
@@ -9,10 +9,17 @@ export type SessionLaneProps = {
   lane: Lane;
   approvals: BoardState['pendingApprovals'];
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
+  definitions: Map<string, AgentDefinition>;
   onOpen: () => void;
 };
 
-export const SessionLaneView = ({ lane, approvals, onDecide, onOpen }: SessionLaneProps) => {
+export const SessionLaneView = ({
+  lane,
+  approvals,
+  onDecide,
+  definitions,
+  onOpen,
+}: SessionLaneProps) => {
   const { t } = useI18n();
   const entrypoint = t(`entry.${lane.entrypoint}` as 'entry.cli');
   const approvalFor = (agentId: string) =>
@@ -89,6 +96,7 @@ export const SessionLaneView = ({ lane, approvals, onDecide, onOpen }: SessionLa
                 card={card}
                 color={agentColor(index)}
                 ordinal={ordinals.get(card.agentId)}
+                definition={card.agentType ? definitions.get(card.agentType) : undefined}
                 approval={approvalFor(card.agentId)}
                 onDecide={onDecide}
                 onOpen={onOpen}
