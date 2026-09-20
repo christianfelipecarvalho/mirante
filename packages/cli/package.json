@@ -1,0 +1,41 @@
+{
+  "name": "mirante",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "license": "MIT",
+  "description": "Local lookout for coding agents. See every agent, what it's doing, what it's waiting on, and what it costs.",
+  "keywords": [
+    "claude-code",
+    "agents",
+    "observability",
+    "dashboard",
+    "local"
+  ],
+  "homepage": "https://github.com/christianfelipecarvalho/mirante",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christianfelipecarvalho/mirante.git"
+  },
+  "bugs": "https://github.com/christianfelipecarvalho/mirante/issues",
+  "bin": {
+    "mirante": "./dist/bin.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "web"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly"
+  },
+  "dependencies": {
+    "@mirante/daemon": "workspace:*",
+    "@mirante/installer": "workspace:*",
+    "@mirante/shared": "workspace:*"
+  }
+}

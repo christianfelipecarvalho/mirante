@@ -12,7 +12,7 @@ Mirante is a local, browser-based board that answers those questions while you k
 
 ## Status
 
-**Pre-release — M1 in progress.** The event contract and the transcript reader are the current focus. Not yet published to npm. See [the roadmap](#roadmap) and the [open milestones](https://github.com/christianfelipecarvalho/mirante/milestones).
+**Pre-release — M1 feature-complete, not yet published to npm.** Everything below works today from a clone; the `npx` route arrives with the first release. See [Run from source](#run-from-source) and the [roadmap](#roadmap).
 
 ---
 
@@ -48,8 +48,8 @@ Every source is normalized into the same append-only event stream before it reac
 Two commands:
 
 ```bash
-npx mirante install   # writes a marked, reversible block into your Claude Code settings
-npx mirante           # starts the daemon and opens http://127.0.0.1:7788
+npx mirante install   # wires hooks and the status line into your Claude Code settings
+npx mirante           # starts the daemon and serves the board on http://127.0.0.1:7788
 ```
 
 Then open Claude Code the way you always do. The board fills itself.
@@ -67,6 +67,31 @@ npx mirante uninstall
 ```
 
 `install` writes only inside a demarcated block, backs up every file it touches with a timestamp, merges without destroying hooks or a status line you already had, and prints exactly what changed. `uninstall` reverses precisely that block and restores your previous status line.
+
+## Run from source
+
+Until the first npm release, this is the way in. Requires Node 22.13+ and pnpm.
+
+```bash
+git clone https://github.com/christianfelipecarvalho/mirante.git
+cd mirante
+pnpm install
+pnpm build
+
+node packages/cli/dist/bin.js install   # or: pnpm mirante install
+node packages/cli/dist/bin.js           # starts the daemon, prints the board URL
+```
+
+Try it against a throwaway configuration first — `MIRANTE_HOME` and `--settings` keep it
+entirely out of your real setup:
+
+```bash
+MIRANTE_HOME=/tmp/mirante-try node packages/cli/dist/bin.js install \
+  --settings /tmp/mirante-try/settings.json --port 7799
+```
+
+`mirante doctor` tells you whether hooks are firing, the status line is reporting, and
+transcripts are being read — the three things that have to be true for the board to fill.
 
 ## Privacy and safety
 
