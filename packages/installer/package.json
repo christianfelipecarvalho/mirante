@@ -1,0 +1,17 @@
+{
+  "name": "@mirante/installer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Reversible, idempotent changes to Claude Code settings",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}
