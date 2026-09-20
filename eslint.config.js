@@ -19,5 +19,11 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // The board talks to the daemon that served it, on loopback and same-origin.
+    // ADR-0005 forbids leaving the machine, not calling the local daemon.
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    rules: { 'no-restricted-globals': 'off' },
+  },
   prettier,
 );

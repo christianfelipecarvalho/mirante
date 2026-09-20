@@ -1,0 +1,77 @@
+@import 'tailwindcss';
+
+/*
+ * Tokens, not raw hex, so light and dark swap in one place.
+ *
+ * Dark is the default here because this is a tool that sits beside a terminal.
+ * The light values are a selected set from the same ramps, not an inversion.
+ */
+:root {
+  color-scheme: dark;
+
+  --surface-1: #1a1a19;
+  --surface-2: #232321;
+  --plane: #0d0d0d;
+
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+
+  --hairline: rgba(255, 255, 255, 0.1);
+  --gridline: #2c2c2a;
+  --baseline: #383835;
+
+  --accent: #3987e5;
+  --accent-dim: #184f95;
+  --accent-track: #10305c;
+
+  /* Status is fixed and never themed; each use ships with an icon and a label. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --surface-1: #fcfcfb;
+  --surface-2: #f3f3f0;
+  --plane: #f9f9f7;
+
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+
+  --hairline: rgba(11, 11, 11, 0.1);
+  --gridline: #e1e0d9;
+  --baseline: #c3c2b7;
+
+  --accent: #2a78d6;
+  --accent-dim: #86b6ef;
+  --accent-track: #cde2fb;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--text-primary);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Columns of numbers align; standalone values keep proportional figures. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
