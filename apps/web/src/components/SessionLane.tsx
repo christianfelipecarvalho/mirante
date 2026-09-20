@@ -1,6 +1,7 @@
 import type { BoardState, SessionLane as Lane } from '@mirante/shared';
 import { formatCost, formatTokens } from '../lib/format';
 import { useI18n } from '../lib/i18n';
+import { agentOrdinals } from '../lib/agents';
 import { agentColor } from '../lib/palette';
 import { AgentCardView } from './AgentCard';
 
@@ -19,6 +20,7 @@ export const SessionLaneView = ({ lane, approvals, onDecide, onOpen }: SessionLa
 
   const root = lane.cards.find((card) => card.agentId === 'main');
   const subagents = lane.cards.filter((card) => card.agentId !== 'main');
+  const ordinals = agentOrdinals(lane.cards);
 
   return (
     <section
@@ -86,6 +88,7 @@ export const SessionLaneView = ({ lane, approvals, onDecide, onOpen }: SessionLa
                 key={card.agentId}
                 card={card}
                 color={agentColor(index)}
+                ordinal={ordinals.get(card.agentId)}
                 approval={approvalFor(card.agentId)}
                 onDecide={onDecide}
                 onOpen={onOpen}

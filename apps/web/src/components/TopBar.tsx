@@ -4,6 +4,7 @@ import type { Connection } from '../lib/client';
 import { formatCost, formatTokens } from '../lib/format';
 import { LOCALES, LOCALE_LABEL, useI18n } from '../lib/i18n';
 import { THEMES, useTheme, type Theme } from '../lib/theme';
+import { Logo } from './Logo';
 import { Meter } from './Meter';
 import { StatTile } from './StatTile';
 
@@ -46,6 +47,19 @@ export const TopBar = ({ board, connection }: { board: BoardState; connection: C
   const hintKey = planHintKey(board);
   const hint = hintKey ? t(hintKey) : undefined;
 
+  // Plan usage persists across restarts, so it can be hours old and still look
+  // current. Say how old once it stops being a live reading.
+  const staleness = (() => {
+    if (!board.planUsageUpdatedAt) return undefined;
+    const minutes = Math.round((Date.now() - Date.parse(board.planUsageUpdatedAt)) / 60_000);
+    if (!Number.isFinite(minutes) || minutes < 3) return undefined;
+    const ago =
+      minutes < 60
+        ? t('plan.ago.minutes', { n: minutes })
+        : t('plan.ago.hours', { n: Math.round(minutes / 60) });
+    return t('plan.asOf', { ago });
+  })();
+
   return (
     <header
       className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border px-4 py-3"
@@ -53,14 +67,13 @@ export const TopBar = ({ board, connection }: { board: BoardState; connection: C
     >
       <div className="flex items-center gap-2.5">
         <span
-          aria-hidden="true"
-          className="grid size-7 place-items-center rounded-lg text-[14px]"
+          className="grid size-8 place-items-center rounded-lg"
           style={{
-            background: 'color-mix(in oklab, var(--accent) 18%, transparent)',
+            background: 'color-mix(in oklab, var(--accent) 16%, transparent)',
             color: 'var(--accent)',
           }}
         >
-          ⌂
+          <Logo size={19} />
         </span>
         <div>
           <div className="flex items-baseline gap-2">
@@ -100,25 +113,30 @@ export const TopBar = ({ board, connection }: { board: BoardState; connection: C
         />
       </div>
 
-      <div className="flex min-w-[280px] flex-1 items-start gap-4">
-        <Meter
-          label={t('plan.fiveHour')}
-          percentage={board.planUsage?.fiveHour?.usedPercentage}
-          resetsAt={board.planUsage?.fiveHour?.resetsAt}
-          unknownHint={hint}
-        />
-        <Meter
-          label={t('plan.weekly')}
-          percentage={board.planUsage?.sevenDay?.usedPercentage}
-          resetsAt={board.planUsage?.sevenDay?.resetsAt}
-          unknownHint={hint}
-        />
-        {board.planUsage?.spendLimit && (
+      <div className="flex min-w-[280px] flex-1 flex-col gap-1">
+        <div className="flex items-start gap-4">
           <Meter
-            label={t('plan.spend')}
-            percentage={board.planUsage.spendLimit.usedPercentage}
-            resetsAt={board.planUsage.spendLimit.resetsAt}
+            label={t('plan.fiveHour')}
+            percentage={board.planUsage?.fiveHour?.usedPercentage}
+            resetsAt={board.planUsage?.fiveHour?.resetsAt}
+            unknownHint={hint}
           />
+          <Meter
+            label={t('plan.weekly')}
+            percentage={board.planUsage?.sevenDay?.usedPercentage}
+            resetsAt={board.planUsage?.sevenDay?.resetsAt}
+            unknownHint={hint}
+          />
+          {board.planUsage?.spendLimit && (
+            <Meter
+              label={t('plan.spend')}
+              percentage={board.planUsage.spendLimit.usedPercentage}
+              resetsAt={board.planUsage.spendLimit.resetsAt}
+            />
+          )}
+        </div>
+        {staleness && (
+          <span className="text-right text-[10px] text-[var(--text-muted)]">{staleness}</span>
         )}
       </div>
 

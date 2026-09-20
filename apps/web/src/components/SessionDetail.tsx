@@ -4,6 +4,7 @@ import { totalTokens } from '@mirante/shared';
 import { formatCost, formatDuration, formatTokens, formatWhen } from '../lib/format';
 import { agentIcon, agentLabel } from '../lib/icons';
 import { useI18n } from '../lib/i18n';
+import { agentOrdinals } from '../lib/agents';
 import { agentColor } from '../lib/palette';
 import { buildSteps } from '../lib/steps';
 import { buildTurns, type Turn } from '../lib/turns';
@@ -53,6 +54,7 @@ export const SessionDetail = ({
     isRoot ? 'var(--accent)' : agentColor(index);
   const subagents = lane.cards.filter((card) => card.agentId !== 'main');
   const root = lane.cards.find((card) => card.agentId === 'main');
+  const ordinals = agentOrdinals(lane.cards);
 
   const openAgent = (id: string) => {
     setAgentId(id);
@@ -147,6 +149,7 @@ export const SessionDetail = ({
                     key={card.agentId}
                     card={card}
                     color={colorFor(index, false)}
+                    ordinal={ordinals.get(card.agentId)}
                     approval={approvals.find(
                       (a) => a.sessionId === lane.sessionId && a.agentId === card.agentId,
                     )}

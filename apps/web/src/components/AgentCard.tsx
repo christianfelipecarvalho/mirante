@@ -1,6 +1,7 @@
 import type { AgentCard as Card, PendingApproval, WaitingOn } from '@mirante/shared';
 import { isWaitingState } from '@mirante/shared';
 import { formatDuration, formatTokens, formatWaitingFor } from '../lib/format';
+import { agentRoleKey } from '../lib/agents';
 import { agentIcon, agentLabel } from '../lib/icons';
 import { useI18n, type Translate } from '../lib/i18n';
 import { StateBadge } from './StateBadge';
@@ -33,6 +34,8 @@ const waitingText = (waitingOn: WaitingOn, t: Translate): string => {
 export type AgentCardProps = {
   card: Card;
   color: string;
+  /** Position among agents sharing a type, when there is more than one. */
+  ordinal?: number | undefined;
   approval?: PendingApproval | undefined;
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
   onOpen?: (() => void) | undefined;
@@ -42,6 +45,7 @@ export type AgentCardProps = {
 export const AgentCardView = ({
   card,
   color,
+  ordinal,
   approval,
   onDecide,
   onOpen,
@@ -73,18 +77,28 @@ export const AgentCardView = ({
         </span>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
               {isRoot ? t('card.session') : agentLabel(card.agentType, card.agentId)}
             </span>
+            {/* Agents sharing a type are otherwise impossible to tell apart. */}
+            {ordinal !== undefined && (
+              <span
+                className="tabular shrink-0 rounded px-1 text-[10px] font-medium"
+                style={{ background: `color-mix(in oklab, ${color} 18%, transparent)`, color }}
+              >
+                #{ordinal}
+              </span>
+            )}
             {!isRoot && (
               <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
                 {t('card.subagent')}
               </span>
             )}
           </div>
+          {/* What this agent is for, in words, because its type name rarely says. */}
           <div className="truncate text-[10px] text-[var(--text-muted)]">
-            {card.model ?? (isRoot ? t('card.mainSession') : card.agentId.slice(0, 10))}
+            {t(agentRoleKey(card) as 'role.general')}
           </div>
         </div>
 
@@ -138,6 +152,7 @@ export const AgentCardView = ({
           {formatTokens(card.tokens)} {t('card.tokens')}
         </span>
         <span className="tabular">{formatDuration(card.startedAt, card.endedAt)}</span>
+        {card.model && <span className="truncate">{card.model}</span>}
         {card.activeSkill && (
           <span
             className="rounded px-1.5 py-0.5 text-[10px]"
