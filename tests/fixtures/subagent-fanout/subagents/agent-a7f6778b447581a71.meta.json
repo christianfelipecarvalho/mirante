@@ -1,0 +1,7 @@
+{
+  "agentType": "review-frontend",
+  "description": "[redacted description: 30 chars]",
+  "toolUseId": "toolu_01RTVpMZdve2xmgxXTYQrxxT",
+  "spawnDepth": 1,
+  "model": "sonnet"
+}
