@@ -32,15 +32,43 @@ export const formatClock = (iso: string): string => {
     : date.toLocaleTimeString(undefined, { hour12: false });
 };
 
+/**
+ * Clock time, plus the date when it is not today.
+ *
+ * A list sorted correctly across days still reads as scrambled when every row
+ * shows only a wall-clock time.
+ */
+export const formatWhen = (iso: string): string => {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '--:--:--';
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  const clock = date.toLocaleTimeString(undefined, { hour12: false });
+  return sameDay
+    ? clock
+    : `${date.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${clock}`;
+};
+
 /** Plan windows report a Unix epoch in seconds. */
-export const formatReset = (epochSeconds: number | undefined): string => {
+export const formatReset = (
+  epochSeconds: number | undefined,
+  t: (
+    key: 'plan.resetting' | 'plan.resetsInMinutes' | 'plan.resetsInHours' | 'plan.resetsOn',
+    vars?: Record<string, string | number>,
+  ) => string,
+): string => {
   if (epochSeconds === undefined) return '';
   const date = new Date(epochSeconds * 1000);
   const minutes = Math.round((date.getTime() - Date.now()) / 60_000);
-  if (minutes <= 0) return 'resetting';
-  if (minutes < 60) return `resets in ${minutes}m`;
+  if (minutes <= 0) return t('plan.resetting');
+  if (minutes < 60) return t('plan.resetsInMinutes', { n: minutes });
   const hours = Math.round(minutes / 60);
-  return hours < 48 ? `resets in ${hours}h` : `resets ${date.toLocaleDateString()}`;
+  return hours < 48
+    ? t('plan.resetsInHours', { n: hours })
+    : t('plan.resetsOn', { date: date.toLocaleDateString() });
 };
 
 /** How long a card has been stuck, for the "waiting since" line. */

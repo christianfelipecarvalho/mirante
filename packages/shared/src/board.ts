@@ -84,6 +84,13 @@ export type TimelineEntry = {
   /** Already rendered and redacted. The UI displays it, it does not build it. */
   text: string;
   /**
+   * The thing the row is about — a tool name, an agent, a decision.
+   *
+   * Rows whose text is a bare label are localised by the UI from `kind` plus
+   * this; rows carrying real content, like a command or a prompt, use `text`.
+   */
+  subject?: string;
+  /**
    * The underlying fact this row stands for, when two sources can report it.
    * A later, better-sourced report replaces this row instead of adding one.
    */

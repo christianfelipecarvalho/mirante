@@ -120,6 +120,8 @@ export class BoardProjector {
           if (event.payload.spawnMode === 'sync') {
             parent.status = waiting('waiting_subagent', {
               summary: `Waiting on ${event.payload.agentType}`,
+              reason: 'subagent',
+              subject: event.payload.agentType,
               since: event.ts,
               ref: event.agentId,
               ...(event.payload.description ? { detail: event.payload.description } : {}),
@@ -193,7 +195,7 @@ export class BoardProjector {
 
       case 'skill.invoked': {
         card.activeSkill = event.payload.skillName;
-        this.push(event, 'skill', event.payload.skillName);
+        this.push(event, 'skill', event.payload.skillName, event.payload.skillName);
         break;
       }
 
@@ -209,10 +211,18 @@ export class BoardProjector {
         });
         card.status = waiting('waiting_approval', {
           summary: `Approve ${event.payload.toolName}: ${event.payload.inputPreview}`,
+          reason: 'approval',
+          subject: event.payload.toolName,
+          detail: event.payload.inputPreview,
           since: event.ts,
           ref: event.payload.requestId,
         });
-        this.push(event, 'permission', `${event.payload.toolName} needs approval`);
+        this.push(
+          event,
+          'permission',
+          `${event.payload.toolName} needs approval`,
+          event.payload.toolName,
+        );
         break;
       }
 
@@ -225,7 +235,12 @@ export class BoardProjector {
           card.status = active('thinking');
         }
         const how = event.payload.via === 'fallback' ? 'asked in terminal' : event.payload.decision;
-        this.push(event, 'permission', `Permission ${how}`);
+        this.push(
+          event,
+          'permission',
+          `Permission ${how}`,
+          event.payload.via === 'fallback' ? 'fallback' : event.payload.decision,
+        );
         break;
       }
 
@@ -250,7 +265,8 @@ export class BoardProjector {
       }
 
       case 'context.compacted': {
-        if (event.payload.phase === 'pre') this.push(event, 'compaction', 'Context compacted');
+        if (event.payload.phase === 'pre')
+          this.push(event, 'compaction', 'Context compacted', 'context');
         break;
       }
 
@@ -316,6 +332,8 @@ export class BoardProjector {
           summary: window.resetsAt
             ? `At ${label} — resets ${new Date(window.resetsAt * 1000).toISOString()}`
             : `At ${label}`,
+          reason: 'plan_limit',
+          subject: label,
           since: this.planUsageUpdatedAt ?? new Date().toISOString(),
           ref: label,
         };
@@ -381,7 +399,7 @@ export class BoardProjector {
     return card;
   }
 
-  private push(event: MiranteEvent, kind: TimelineKind, text: string): void {
+  private push(event: MiranteEvent, kind: TimelineKind, text: string, subject?: string): void {
     const card = this.cards.get(cardKey(event.sessionId, event.agentId));
 
     // A better-sourced report of the same fact corrects the existing row. Without
@@ -390,6 +408,7 @@ export class BoardProjector {
     const existing = event.dedupeKey ? this.timelineByKey.get(event.dedupeKey) : undefined;
     if (existing) {
       existing.text = text;
+      if (subject !== undefined) existing.subject = subject;
       existing.ts = event.ts;
       if (card?.agentType) existing.agentType = card.agentType;
       return;
@@ -403,6 +422,7 @@ export class BoardProjector {
       ...(card?.agentType ? { agentType: card.agentType } : {}),
       kind,
       text,
+      ...(subject === undefined ? {} : { subject }),
       ...(event.dedupeKey ? { dedupeKey: event.dedupeKey } : {}),
     };
     this.timeline.push(entry);

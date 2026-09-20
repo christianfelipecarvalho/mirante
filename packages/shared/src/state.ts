@@ -42,6 +42,16 @@ export const waitingOnSchema = z.object({
   since: z.string().datetime(),
   /** Correlates back to the thing being awaited: a permission request, a subagent, a tool use. */
   ref: z.string().optional(),
+  /**
+   * Why the card is blocked, as a value rather than as prose.
+   *
+   * `summary` stays the source of truth and the fallback, but a UI that has to
+   * render in more than one language cannot translate a sentence the daemon
+   * already wrote. These two let it build its own.
+   */
+  reason: z.enum(['subagent', 'approval', 'input', 'plan_limit']).optional(),
+  /** What is being waited on: an agent type, a tool name, a limit window. */
+  subject: z.string().optional(),
 });
 export type WaitingOn = z.infer<typeof waitingOnSchema>;
 

@@ -31,6 +31,15 @@ export type Connection = 'connecting' | 'live' | 'offline' | 'unauthorized';
 
 export type BoardClient = {
   board: BoardState;
+  /**
+   * The raw stream, kept alongside the projected board.
+   *
+   * The board answers "what is happening"; a person opening a session wants
+   * "what happened, step by step, for this agent" — which the projection has
+   * deliberately collapsed. Keeping both costs a few megabytes and saves a
+   * round trip per click.
+   */
+  events: MiranteEvent[];
   connection: Connection;
   decide: (requestId: string, behavior: 'allow' | 'deny') => Promise<boolean>;
 };
@@ -39,6 +48,7 @@ const RECONNECT_MS = 1500;
 
 export const useBoard = (): BoardClient => {
   const [board, setBoard] = useState<BoardState>(emptyBoard);
+  const [events, setEvents] = useState<MiranteEvent[]>([]);
   const [connection, setConnection] = useState<Connection>('connecting');
   const tokenRef = useRef<string>('');
   const projectorRef = useRef(new BoardProjector());
@@ -56,14 +66,14 @@ export const useBoard = (): BoardClient => {
 
     const token = tokenRef.current;
 
-    const applyEvents = (events: MiranteEvent[]) => {
-      if (events.length === 0) return;
+    const applyEvents = (incoming: MiranteEvent[]) => {
+      if (incoming.length === 0) return;
       const projector = projectorRef.current;
-      for (const event of events) {
-        if (event.id <= projector.snapshot().lastEventId) continue;
-        projector.apply(event);
-      }
+      const fresh = incoming.filter((event) => event.id > projector.snapshot().lastEventId);
+      if (fresh.length === 0) return;
+      for (const event of fresh) projector.apply(event);
       setBoard(projector.snapshot());
+      setEvents((previous) => [...previous, ...fresh]);
     };
 
     const connect = async () => {
@@ -80,6 +90,7 @@ export const useBoard = (): BoardClient => {
         projectorRef.current = new BoardProjector();
         projectorRef.current.applyAll(body.events);
         setBoard(projectorRef.current.snapshot());
+        setEvents(body.events);
         ready = true;
         applyEvents(buffered);
         buffered = [];
@@ -132,5 +143,5 @@ export const useBoard = (): BoardClient => {
     return body.accepted;
   };
 
-  return { board, connection, decide };
+  return { board, events, connection, decide };
 };

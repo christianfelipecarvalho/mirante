@@ -15,12 +15,13 @@ type Row = {
   agent_type: string | null;
   parent_agent_id: string | null;
   correlation_id: string | null;
+  prompt_id: string | null;
   dedupe_key: string | null;
   kind: string;
   payload: string;
 };
 
-const SCHEMA = `
+const TABLES = `
 CREATE TABLE IF NOT EXISTS events (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   ts              TEXT NOT NULL,
@@ -33,12 +34,11 @@ CREATE TABLE IF NOT EXISTS events (
   agent_type      TEXT,
   parent_agent_id TEXT,
   correlation_id  TEXT,
+  prompt_id       TEXT,
   dedupe_key      TEXT,
   kind            TEXT NOT NULL,
   payload         TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
-CREATE INDEX IF NOT EXISTS idx_events_dedupe  ON events(dedupe_key);
 
 -- Where the transcript reader left off in each file, so a restart resumes
 -- instead of re-emitting a session from the beginning.
@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `;
 
+/**
+ * Created after migration, not with the tables: an index over a column added by
+ * a later version cannot exist until that column does.
+ */
+const INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
+CREATE INDEX IF NOT EXISTS idx_events_dedupe  ON events(dedupe_key);
+CREATE INDEX IF NOT EXISTS idx_events_prompt  ON events(prompt_id);
+`;
+
 const toEvent = (row: Row): MiranteEvent =>
   ({
     id: row.id,
@@ -68,6 +78,7 @@ const toEvent = (row: Row): MiranteEvent =>
     ...(row.agent_type ? { agentType: row.agent_type } : {}),
     ...(row.parent_agent_id ? { parentAgentId: row.parent_agent_id } : {}),
     ...(row.correlation_id ? { correlationId: row.correlation_id } : {}),
+    ...(row.prompt_id ? { promptId: row.prompt_id } : {}),
     ...(row.dedupe_key ? { dedupeKey: row.dedupe_key } : {}),
     kind: row.kind,
     payload: JSON.parse(row.payload) as unknown,
@@ -90,7 +101,27 @@ export class EventLog {
     this.db = new Database(databasePath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
-    this.db.exec(SCHEMA);
+    this.db.exec(TABLES);
+    this.migrate();
+    this.db.exec(INDEXES);
+  }
+
+  /**
+   * Brings an older database up to the current shape.
+   *
+   * `CREATE TABLE IF NOT EXISTS` does nothing for a table that already exists, so
+   * a column added later never appears and every insert fails against a database
+   * from the previous version. Adding columns is the only migration shape needed
+   * so far — the log is append-only, so nothing ever has to be rewritten.
+   */
+  private migrate(): void {
+    const columns = new Set(
+      (this.db.prepare('PRAGMA table_info(events)').all() as { name: string }[]).map((c) => c.name),
+    );
+    const added: [string, string][] = [['prompt_id', 'TEXT']];
+    for (const [name, type] of added) {
+      if (!columns.has(name)) this.db.exec(`ALTER TABLE events ADD COLUMN ${name} ${type}`);
+    }
   }
 
   append(draft: DraftEvent): MiranteEvent {
@@ -103,9 +134,9 @@ export class EventLog {
     const insert = this.db.prepare(`
       INSERT INTO events
         (ts, received_ts, source, session_id, project_path, git_branch, agent_id,
-         agent_type, parent_agent_id, correlation_id, dedupe_key, kind, payload)
+         agent_type, parent_agent_id, correlation_id, prompt_id, dedupe_key, kind, payload)
       VALUES (@ts, @received_ts, @source, @session_id, @project_path, @git_branch, @agent_id,
-              @agent_type, @parent_agent_id, @correlation_id, @dedupe_key, @kind, @payload)
+              @agent_type, @parent_agent_id, @correlation_id, @prompt_id, @dedupe_key, @kind, @payload)
     `);
 
     const run = this.db.transaction((items: readonly DraftEvent[]) =>
@@ -121,6 +152,7 @@ export class EventLog {
           agent_type: draft.agentType ?? null,
           parent_agent_id: draft.parentAgentId ?? null,
           correlation_id: draft.correlationId ?? null,
+          prompt_id: draft.promptId ?? null,
           dedupe_key: draft.dedupeKey ?? null,
           kind: draft.kind,
           payload: JSON.stringify(draft.payload),

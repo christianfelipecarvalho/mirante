@@ -1,4 +1,5 @@
 import { formatReset } from '../lib/format';
+import { useI18n } from '../lib/i18n';
 
 /**
  * Severity rides the fill; the track is a dimmer step of the same ramp, so the
@@ -20,6 +21,7 @@ export type MeterProps = {
 };
 
 export const Meter = ({ label, percentage, resetsAt, unknownHint }: MeterProps) => {
+  const { t } = useI18n();
   // Absence is not zero. Plan usage is missing for API-key users, before the
   // first API response, and once a window has reset — saying "unknown" is the
   // only honest rendering.
@@ -31,7 +33,7 @@ export const Meter = ({ label, percentage, resetsAt, unknownHint }: MeterProps) 
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-[11px] text-[var(--text-secondary)]">{label}</span>
         <span className="tabular text-[11px] font-medium text-[var(--text-primary)]">
-          {known ? `${value.toFixed(0)}%` : 'unknown'}
+          {known ? `${value.toFixed(0)}%` : t('plan.unknown')}
         </span>
       </div>
       <div
@@ -51,7 +53,7 @@ export const Meter = ({ label, percentage, resetsAt, unknownHint }: MeterProps) 
         )}
       </div>
       {known && resetsAt !== undefined && (
-        <div className="mt-1 text-[10px] text-[var(--text-muted)]">{formatReset(resetsAt)}</div>
+        <div className="mt-1 text-[10px] text-[var(--text-muted)]">{formatReset(resetsAt, t)}</div>
       )}
       {!known && unknownHint && (
         <div className="mt-1 text-[10px] text-[var(--text-muted)]" title={unknownHint}>

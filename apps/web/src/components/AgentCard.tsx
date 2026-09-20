@@ -1,15 +1,41 @@
-import type { AgentCard as Card, PendingApproval } from '@mirante/shared';
+import type { AgentCard as Card, PendingApproval, WaitingOn } from '@mirante/shared';
 import { isWaitingState } from '@mirante/shared';
 import { formatDuration, formatTokens, formatWaitingFor } from '../lib/format';
 import { agentIcon, agentLabel } from '../lib/icons';
+import { useI18n, type Translate } from '../lib/i18n';
 import { StateBadge } from './StateBadge';
+
+/**
+ * The waiting reason, in the reader's language.
+ *
+ * The daemon writes an English `summary` and, where it can, the reason as a
+ * value plus its subject. Prefer the value — a sentence written by the server
+ * cannot be translated — and fall back to the summary so a reason Mirante does
+ * not yet model still reaches the screen.
+ */
+const waitingText = (waitingOn: WaitingOn, t: Translate): string => {
+  switch (waitingOn.reason) {
+    case 'subagent':
+      return t('waiting.subagent', { subject: waitingOn.subject ?? '' });
+    case 'approval':
+      return waitingOn.detail
+        ? `${t('waiting.approval', { subject: waitingOn.subject ?? '' })}: ${waitingOn.detail}`
+        : t('waiting.approval', { subject: waitingOn.subject ?? '' });
+    case 'input':
+      return t('waiting.input');
+    case 'plan_limit':
+      return t('waiting.plan_limit', { subject: waitingOn.subject ?? '' });
+    default:
+      return waitingOn.summary;
+  }
+};
 
 export type AgentCardProps = {
   card: Card;
-  /** Identity colour, assigned by the lane in spawn order. */
   color: string;
   approval?: PendingApproval | undefined;
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
+  onOpen?: (() => void) | undefined;
   iconOverrides?: Record<string, string>;
 };
 
@@ -18,24 +44,26 @@ export const AgentCardView = ({
   color,
   approval,
   onDecide,
+  onOpen,
   iconOverrides,
 }: AgentCardProps) => {
+  const { t } = useI18n();
   const waiting = isWaitingState(card.status.state);
   const isRoot = card.agentId === 'main';
   const running = card.status.state === 'tool_running';
 
   return (
     <article
-      className="rounded-lg border p-3"
+      className={`rounded-lg border p-3 transition-colors ${onOpen ? 'cursor-pointer hover:border-[var(--accent)]' : ''}`}
       style={{
         background: 'var(--surface-1)',
         borderColor: waiting
           ? 'color-mix(in oklab, var(--status-warning) 40%, var(--hairline))'
           : 'var(--hairline)',
       }}
+      onClick={onOpen}
     >
       <header className="flex items-start gap-2.5">
-        {/* The agent's identity, at a size you can find by glancing. */}
         <span
           aria-hidden="true"
           className="grid size-8 shrink-0 place-items-center rounded-full text-[15px]"
@@ -47,32 +75,30 @@ export const AgentCardView = ({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
-              {agentLabel(card.agentType, card.agentId)}
+              {isRoot ? t('card.session') : agentLabel(card.agentType, card.agentId)}
             </span>
             {!isRoot && (
-              <span className="shrink-0 text-[10px] text-[var(--text-muted)]">subagent</span>
+              <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
+                {t('card.subagent')}
+              </span>
             )}
           </div>
           <div className="truncate text-[10px] text-[var(--text-muted)]">
-            {card.model ?? (isRoot ? 'main session' : card.agentId.slice(0, 10))}
+            {card.model ?? (isRoot ? t('card.mainSession') : card.agentId.slice(0, 10))}
           </div>
         </div>
 
         <StateBadge status={card.status} />
       </header>
 
-      {/*
-        The waiting reason is the product: it is rendered before anything else a
-        card could say, and it is never collapsed away.
-      */}
       {card.status.waitingOn ? (
         <div
           className="mt-2 rounded border-l-2 py-1 pl-2 text-[12px]"
           style={{ borderColor: 'var(--status-warning)', background: 'var(--surface-2)' }}
         >
-          <div className="text-[var(--text-primary)]">{card.status.waitingOn.summary}</div>
+          <div className="text-[var(--text-primary)]">{waitingText(card.status.waitingOn, t)}</div>
           <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">
-            waiting {formatWaitingFor(card.status.waitingOn.since)}
+            {t('waiting.for', { duration: formatWaitingFor(card.status.waitingOn.since) })}
           </div>
         </div>
       ) : (
@@ -83,38 +109,46 @@ export const AgentCardView = ({
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => onDecide(approval.requestId, 'allow')}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDecide(approval.requestId, 'allow');
+            }}
             className="rounded px-2.5 py-1 text-[11px] font-medium text-white"
             style={{ background: 'var(--status-good)' }}
           >
-            Allow
+            {t('card.allow')}
           </button>
           <button
             type="button"
-            onClick={() => onDecide(approval.requestId, 'deny')}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDecide(approval.requestId, 'deny');
+            }}
             className="rounded px-2.5 py-1 text-[11px] font-medium text-white"
             style={{ background: 'var(--status-critical)' }}
           >
-            Deny
+            {t('card.deny')}
           </button>
-          <span className="text-[10px] text-[var(--text-muted)]">or the terminal will ask</span>
+          <span className="text-[10px] text-[var(--text-muted)]">{t('card.orTerminal')}</span>
         </div>
       )}
 
       <footer className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-muted)]">
-        <span className="tabular">{formatTokens(card.tokens)} tok</span>
+        <span className="tabular">
+          {formatTokens(card.tokens)} {t('card.tokens')}
+        </span>
         <span className="tabular">{formatDuration(card.startedAt, card.endedAt)}</span>
         {card.activeSkill && (
           <span
             className="rounded px-1.5 py-0.5 text-[10px]"
             style={{ background: 'var(--surface-2)', color: 'var(--text-secondary)' }}
           >
-            skill: {card.activeSkill}
+            {card.activeSkill}
           </span>
         )}
         {card.runningChildren > 0 && (
           <span className="ml-auto text-[10px]" style={{ color: 'var(--accent)' }}>
-            ⇣ {card.runningChildren} agent{card.runningChildren === 1 ? '' : 's'} running
+            ⇣ {t('card.agentsRunning', { count: card.runningChildren })}
           </span>
         )}
       </footer>
@@ -138,16 +172,16 @@ const ActivityLine = ({
   running: boolean;
   color: string;
 }) => {
+  const { t } = useI18n();
   const current = card.activity;
   const previous = card.lastActivity;
-
   if (!current && !previous) return null;
 
   return (
     <div className="mt-2 flex items-start gap-1.5 text-[12px]">
       <span
         aria-hidden="true"
-        className="mt-[3px] shrink-0 text-[9px]"
+        className={`mt-[3px] shrink-0 text-[9px] ${running ? 'animate-pulse' : ''}`}
         style={{ color: running ? color : 'var(--text-muted)' }}
       >
         {running ? '▶' : '↩'}
@@ -160,7 +194,9 @@ const ActivityLine = ({
         >
           {current ?? previous}
         </div>
-        {!current && <div className="text-[10px] text-[var(--text-muted)]">last action</div>}
+        {!current && (
+          <div className="text-[10px] text-[var(--text-muted)]">{t('card.lastAction')}</div>
+        )}
       </div>
     </div>
   );

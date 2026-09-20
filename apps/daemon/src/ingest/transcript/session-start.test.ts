@@ -81,3 +81,26 @@ describe('skill attribution', () => {
     }
   });
 });
+
+describe('attributing work to the request that caused it', () => {
+  it('carries the turn id from a prompt onto the assistant work that answers it', () => {
+    // Only `user` entries carry promptId. Tools and token usage hang off
+    // `assistant` entries, so reading the field literally costs every request at
+    // zero tools and zero tokens.
+    const attributed = events.filter((event) => event.promptId !== undefined);
+    const tools = attributed.filter((event) => event.kind === 'tool.started');
+    const usage = attributed.filter((event) => event.kind === 'usage.updated');
+    expect(tools.length).toBeGreaterThan(0);
+    expect(usage.length).toBeGreaterThan(0);
+  });
+
+  it('groups a turn under the prompt that opened it, not the one after', () => {
+    const prompts = events.filter((event) => event.kind === 'prompt.submitted');
+    expect(prompts.length).toBeGreaterThan(0);
+    const first = prompts[0];
+    const sameTurn = events.filter(
+      (event) => event.promptId === first?.promptId && event.ts >= (first?.ts ?? ''),
+    );
+    expect(sameTurn.length).toBeGreaterThan(1);
+  });
+});

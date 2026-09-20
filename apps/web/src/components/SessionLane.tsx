@@ -1,24 +1,19 @@
 import type { BoardState, SessionLane as Lane } from '@mirante/shared';
 import { formatCost, formatTokens } from '../lib/format';
+import { useI18n } from '../lib/i18n';
 import { agentColor } from '../lib/palette';
 import { AgentCardView } from './AgentCard';
-
-const ENTRYPOINT_LABEL: Record<string, string> = {
-  cli: 'terminal',
-  vscode: 'VS Code',
-  sdk: 'SDK',
-  print: 'claude -p',
-  unknown: '',
-};
 
 export type SessionLaneProps = {
   lane: Lane;
   approvals: BoardState['pendingApprovals'];
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
+  onOpen: () => void;
 };
 
-export const SessionLaneView = ({ lane, approvals, onDecide }: SessionLaneProps) => {
-  const entrypoint = ENTRYPOINT_LABEL[lane.entrypoint] ?? '';
+export const SessionLaneView = ({ lane, approvals, onDecide, onOpen }: SessionLaneProps) => {
+  const { t } = useI18n();
+  const entrypoint = t(`entry.${lane.entrypoint}` as 'entry.cli');
   const approvalFor = (agentId: string) =>
     approvals.find((a) => a.sessionId === lane.sessionId && a.agentId === agentId);
 
@@ -31,7 +26,13 @@ export const SessionLaneView = ({ lane, approvals, onDecide }: SessionLaneProps)
       style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
     >
       <header className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">{lane.projectName}</h3>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="text-[13px] font-semibold text-[var(--text-primary)] hover:text-[var(--accent)]"
+        >
+          {lane.projectName} <span className="text-[10px] font-normal">↗</span>
+        </button>
         {lane.gitBranch && (
           <span className="text-[11px] text-[var(--text-secondary)]">⑂ {lane.gitBranch}</span>
         )}
@@ -44,12 +45,16 @@ export const SessionLaneView = ({ lane, approvals, onDecide }: SessionLaneProps)
           </span>
         )}
         <span className="ml-auto flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
-          <span className="tabular">{formatTokens(lane.tokens)} tok</span>
+          <span className="tabular">
+            {formatTokens(lane.tokens)} {t('card.tokens')}
+          </span>
           <span className="tabular">{formatCost(lane.costUsd)}</span>
           {lane.context && (
-            <span className="tabular">{lane.context.usedPercentage.toFixed(0)}% ctx</span>
+            <span className="tabular">
+              {lane.context.usedPercentage.toFixed(0)}% {t('lane.context')}
+            </span>
           )}
-          {lane.endedAt && <span>ended</span>}
+          {lane.endedAt && <span>{t('lane.ended')}</span>}
         </span>
       </header>
 
@@ -59,6 +64,7 @@ export const SessionLaneView = ({ lane, approvals, onDecide }: SessionLaneProps)
           color="var(--accent)"
           approval={approvalFor(root.agentId)}
           onDecide={onDecide}
+          onOpen={onOpen}
         />
       )}
 
@@ -70,7 +76,9 @@ export const SessionLaneView = ({ lane, approvals, onDecide }: SessionLaneProps)
       {subagents.length > 0 && (
         <div className="mt-2 border-l pl-3" style={{ borderColor: 'var(--baseline)' }}>
           <div className="mb-1.5 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-            {subagents.length} subagent{subagents.length === 1 ? '' : 's'}
+            {subagents.length === 1
+              ? t('card.subagent.one')
+              : t('card.subagents', { count: subagents.length })}
           </div>
           <div className="grid gap-2 md:grid-cols-2 2xl:grid-cols-3">
             {subagents.map((card, index) => (
@@ -80,6 +88,7 @@ export const SessionLaneView = ({ lane, approvals, onDecide }: SessionLaneProps)
                 color={agentColor(index)}
                 approval={approvalFor(card.agentId)}
                 onDecide={onDecide}
+                onOpen={onOpen}
               />
             ))}
           </div>

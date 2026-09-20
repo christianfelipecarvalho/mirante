@@ -126,6 +126,14 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
   const events: DraftEvent[] = [];
   const isMain = ctx.agentId === MAIN_AGENT_ID;
   let lastSkill: string | undefined;
+  /**
+   * Only `user` entries carry `promptId`; the assistant turns that answer them do
+   * not. Tools and token usage all hang off assistant entries, so reading the
+   * field literally attributes nothing to the request that caused it — every
+   * request would report zero tools and zero tokens. The id carries forward
+   * until the next prompt replaces it.
+   */
+  let currentPromptId: string | undefined;
 
   const base = (entry: TranscriptEntry) => ({
     ts: entry.timestamp ?? new Date(0).toISOString(),
@@ -136,6 +144,8 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     agentId: ctx.agentId,
     ...(ctx.agentType === undefined ? {} : { agentType: ctx.agentType }),
     ...(ctx.parentAgentId === undefined ? {} : { parentAgentId: ctx.parentAgentId }),
+    // Every event carries the turn that caused it, so a request can be costed.
+    ...(currentPromptId === undefined ? {} : { promptId: currentPromptId }),
   });
 
   // Transcripts open with bookkeeping records — bridge-session, queue-operation,
@@ -148,6 +158,8 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
   let sessionStartEmitted = false;
 
   conversational.forEach((entry) => {
+    if (entry.promptId) currentPromptId = entry.promptId;
+
     if (isMain && !sessionStartEmitted && entry.cwd && entry.timestamp) {
       sessionStartEmitted = true;
       events.push({

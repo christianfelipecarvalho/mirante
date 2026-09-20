@@ -37,8 +37,18 @@ export const eventEnvelopeSchema = z.object({
   agentType: z.string().optional(),
   parentAgentId: agentIdSchema.optional(),
 
-  /** `prompt_id` or `tool_use_id`, for stitching a turn together across sources. */
+  /** `tool_use_id`, for stitching one tool call together across sources. */
   correlationId: z.string().optional(),
+
+  /**
+   * The turn this belongs to — Claude Code's `prompt_id`.
+   *
+   * Kept separate from `correlationId` because they answer different questions:
+   * one identifies a single tool call, the other groups everything that happened
+   * because a person asked for something. Without it there is no way to say how
+   * many agents a request spawned or what it cost.
+   */
+  promptId: z.string().optional(),
 
   /**
    * Identity of the underlying fact, when two sources can report it.

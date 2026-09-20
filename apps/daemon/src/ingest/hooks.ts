@@ -67,7 +67,7 @@ export const hookToEvents = (payload: HookPayload, context: HookContext = {}): D
     projectPath: payload.cwd ?? '',
     agentId: payload.agent_id ?? MAIN_AGENT_ID,
     ...(payload.agent_type ? { agentType: payload.agent_type } : {}),
-    ...(payload.prompt_id ? { correlationId: payload.prompt_id } : {}),
+    ...(payload.prompt_id ? { promptId: payload.prompt_id } : {}),
   };
 
   switch (payload.hook_event_name) {
@@ -250,6 +250,8 @@ export const hookToEvents = (payload: HookPayload, context: HookContext = {}): D
               state: 'waiting_input',
               waitingOn: {
                 summary: preview(payload.message ?? 'Claude is waiting for you'),
+                reason: 'input',
+                subject: type,
                 since: ts,
                 ref: type,
               },
