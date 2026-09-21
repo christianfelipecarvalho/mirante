@@ -7,11 +7,16 @@ import type {
   TimelineKind,
 } from './board.js';
 import { MAIN_AGENT_ID } from './agent.js';
-import { sourceOutranks } from './dedupe.js';
+import { dedupeKeyOf, sourceOutranks } from './dedupe.js';
 import type { MiranteEvent } from './event.js';
 import type { EventSource } from './kinds.js';
 import { isTerminalState, type CardStatus, type WaitingOn } from './state.js';
-import { addTokenUsage, emptyTokenUsage, type PlanUsage } from './usage.js';
+import {
+  PLAN_READING_MAX_AGE_MS,
+  addTokenUsage,
+  emptyTokenUsage,
+  type PlanUsage,
+} from './usage.js';
 
 /** Timeline entries older than this are dropped; the board is a live view, not an archive. */
 const TIMELINE_LIMIT = 2000;
@@ -50,6 +55,13 @@ export class BoardProjector {
   private timeline: TimelineEntry[] = [];
   /** dedupeKey → the row standing for that fact, so a correction rewrites it in place. */
   private readonly timelineByKey = new Map<string, TimelineEntry>();
+  /**
+   * Agents already counted against their parent's running children. A start is
+   * reported by the hook and again by the transcript, and the better source is
+   * applied over the first — counting both left a parent "3 running" with every
+   * child finished.
+   */
+  private readonly countedStarts = new Set<string>();
   private planUsage: PlanUsage | undefined;
   private planUsageUpdatedAt: string | undefined;
   private lastEventId = 0;
@@ -59,14 +71,51 @@ export class BoardProjector {
 
     // Two sources describing the same fact collapse here. The log keeps both;
     // the board shows one. See ADR-0002.
-    if (event.dedupeKey) {
-      const previous = this.applied.get(event.dedupeKey);
+    const key = dedupeKeyOf(event);
+    if (key) {
+      const previous = this.applied.get(key);
       if (previous !== undefined && !sourceOutranks(event.source, previous)) return;
-      this.applied.set(event.dedupeKey, event.source);
+      this.applied.set(key, event.source);
+    }
+
+    // Plan limits belong to the account, not to a session. Folding them before a
+    // lane exists is what lets the `/usage` probe report them without inventing
+    // a session to hang them on.
+    if (event.kind === 'plan.usage.updated') {
+      // The newest reading wins, not the last one applied. Three sources report
+      // it — the status line, the cached figure, the /usage command — each dated
+      // when the figure was taken, and they do not arrive in that order.
+      if (this.planUsageUpdatedAt === undefined || event.ts >= this.planUsageUpdatedAt) {
+        // Only the status line reports the spend limit. A reading from the cache
+        // or the command would otherwise erase it every minute, and the meter
+        // would blink out until the next terminal refresh.
+        const keptSpend =
+          event.payload.usage.spendLimit === undefined ? this.planUsage?.spendLimit : undefined;
+        this.planUsage = {
+          ...event.payload.usage,
+          ...(keptSpend ? { spendLimit: keptSpend } : {}),
+        };
+        this.planUsageUpdatedAt = event.ts;
+      }
+      return;
     }
 
     const lane = this.ensureLane(event);
+
+    // An agent Mirante only ever saw finish started while the daemon was not
+    // listening. There is no type, no task, no tokens and no duration to show —
+    // a card for it would be an empty box with an opaque id for a name. Record
+    // that it happened and move on.
+    if (
+      event.kind === 'agent.finished' &&
+      !this.cards.has(cardKey(event.sessionId, event.agentId))
+    ) {
+      this.push(event, 'handoff.end', `${event.agentType ?? event.agentId} → ${MAIN_AGENT_ID}`);
+      return;
+    }
+
     const card = this.ensureCard(event);
+    if (card.lastEventAt === undefined || event.ts > card.lastEventAt) card.lastEventAt = event.ts;
 
     switch (event.kind) {
       case 'session.started': {
@@ -97,22 +146,36 @@ export class BoardProjector {
       case 'prompt.submitted': {
         card.status = active('thinking');
         card.activity = event.payload.preview;
-        card.lastActivity = `Prompt: ${event.payload.preview}`;
+        card.lastActivity = event.payload.preview;
+        card.lastActivityKind = 'prompt';
         this.push(event, 'prompt', event.payload.preview);
         break;
       }
 
       case 'agent.started': {
         card.agentType = event.payload.agentType;
-        if (event.payload.description) card.lastActivity = event.payload.description;
+        // Kept out of `activity`, which the agent's first tool call overwrites.
+        if (event.payload.description) card.task = event.payload.description;
         if (event.parentAgentId) card.parentAgentId = event.parentAgentId;
         if (event.payload.model) card.model = event.payload.model;
         card.spawnMode = event.payload.spawnMode;
         card.startedAt = event.ts;
-        card.status = active('thinking');
-        if (event.payload.description) card.activity = event.payload.description;
+        if (event.payload.description) {
+          card.lastActivity = event.payload.description;
+          delete card.lastActivityKind;
+        }
 
-        const parent = this.parentOf(event);
+        // A second report of the start can land after the finish — the watcher
+        // reads a transcript later than the hook fired. It may correct the
+        // details above, but it must not bring a finished agent back to life.
+        const firstReport = !this.countedStarts.has(cardKey(event.sessionId, event.agentId));
+        this.countedStarts.add(cardKey(event.sessionId, event.agentId));
+        if (card.endedAt === undefined) {
+          card.status = active('thinking');
+          if (event.payload.description) card.activity = event.payload.description;
+        }
+
+        const parent = firstReport ? this.parentOf(event) : undefined;
         if (parent) {
           parent.runningChildren += 1;
           // Only a synchronous call blocks the parent. An async one leaves it
@@ -131,19 +194,24 @@ export class BoardProjector {
         this.push(
           event,
           'handoff.start',
-          `${parent?.agentType ?? parent?.agentId ?? MAIN_AGENT_ID} → ${event.payload.agentType}`,
+          `${(parent ?? this.parentOf(event))?.agentType ?? (parent ?? this.parentOf(event))?.agentId ?? MAIN_AGENT_ID} → ${event.payload.agentType}`,
+          event.payload.agentType,
         );
         break;
       }
 
       case 'agent.finished': {
+        // The hook and the transcript both report an end, and the better source
+        // is applied over the first. Only the first may count against the
+        // parent's running children, or the count goes wrong by one per agent.
+        const wasRunning = card.endedAt === undefined;
         card.status = active(event.payload.outcome === 'error' ? 'error' : 'done');
         card.endedAt = event.ts;
         delete card.activity;
         delete card.currentTool;
 
         const parent = this.parentOf(event);
-        if (parent) {
+        if (parent && wasRunning) {
           parent.runningChildren = Math.max(0, parent.runningChildren - 1);
           if (
             parent.status.state === 'waiting_subagent' &&
@@ -153,7 +221,12 @@ export class BoardProjector {
           }
         }
         const back = event.payload.handedBackTo ?? parent?.agentId ?? MAIN_AGENT_ID;
-        this.push(event, 'handoff.end', `${card.agentType ?? event.agentId} → ${back}`);
+        this.push(
+          event,
+          'handoff.end',
+          `${card.agentType ?? event.agentId} → ${back}`,
+          card.agentType,
+        );
         break;
       }
 
@@ -169,7 +242,8 @@ export class BoardProjector {
           ? `${event.payload.toolName}: ${event.payload.summary}`
           : event.payload.toolName;
         card.lastActivity = card.activity;
-        this.push(event, 'tool', card.activity);
+        delete card.lastActivityKind;
+        this.push(event, 'tool', card.activity, event.payload.toolName);
         break;
       }
 
@@ -189,7 +263,13 @@ export class BoardProjector {
         }
         card.activity = `${event.payload.toolName} failed`;
         card.lastActivity = card.activity;
-        this.push(event, 'tool.failed', `${event.payload.toolName}: ${event.payload.errorPreview}`);
+        delete card.lastActivityKind;
+        this.push(
+          event,
+          'tool.failed',
+          `${event.payload.toolName}: ${event.payload.errorPreview}`,
+          event.payload.toolName,
+        );
         break;
       }
 
@@ -258,12 +338,6 @@ export class BoardProjector {
         break;
       }
 
-      case 'plan.usage.updated': {
-        this.planUsage = event.payload.usage;
-        this.planUsageUpdatedAt = event.ts;
-        break;
-      }
-
       case 'context.compacted': {
         if (event.payload.phase === 'pre')
           this.push(event, 'compaction', 'Context compacted', 'context');
@@ -280,6 +354,14 @@ export class BoardProjector {
       case 'error.raised': {
         card.status = active('error');
         card.activity = event.payload.message;
+        if (event.payload.kind === 'rate_limit') {
+          // The hook and the transcript both report the refusal, in either
+          // order, and only the transcript knows the window. A later report
+          // without it must not erase the one that had it.
+          card.stoppedAtLimit = event.payload.limit ?? card.stoppedAtLimit ?? {};
+        } else {
+          delete card.stoppedAtLimit;
+        }
         this.push(event, 'error', event.payload.message);
         break;
       }
@@ -290,8 +372,12 @@ export class BoardProjector {
     for (const event of events) this.apply(event);
   }
 
-  snapshot(): BoardState {
-    const limited = this.atPlanLimit();
+  /**
+   * `now` exists for the plan-limit overlay: a reading that said 100% stops
+   * meaning anything once its window resets, and only a clock can tell.
+   */
+  snapshot(now: number = Date.now()): BoardState {
+    const limited = this.atPlanLimit(now);
     const sessions = [...this.lanes.values()]
       .map((lane) => ({
         ...lane,
@@ -320,22 +406,34 @@ export class BoardProjector {
    * is applied as a display overlay rather than written into card state. That
    * way it disappears by itself when the window resets, with nothing to undo.
    */
-  private atPlanLimit(): WaitingOn | undefined {
+  private atPlanLimit(now: number): WaitingOn | undefined {
+    const readingAge = this.planUsageUpdatedAt
+      ? now - Date.parse(this.planUsageUpdatedAt)
+      : Number.POSITIVE_INFINITY;
+    // `subject` is a stable key the interface localises; `summary` stays English
+    // as the required fallback.
     const windows = [
-      ['5-hour limit', this.planUsage?.fiveHour],
-      ['weekly limit', this.planUsage?.sevenDay],
-      ['spend limit', this.planUsage?.spendLimit],
+      ['fiveHour', '5-hour limit', this.planUsage?.fiveHour],
+      ['sevenDay', 'weekly limit', this.planUsage?.sevenDay],
+      ['spendLimit', 'spend limit', this.planUsage?.spendLimit],
     ] as const;
-    for (const [label, window] of windows) {
+    for (const [key, label, window] of windows) {
+      // A reading of 100% whose window has since reset says nothing about now.
+      // Without this, one stale reading from last night marks every card on the
+      // board as rate limited this morning — observed.
+      if (window?.resetsAt !== undefined && window.resetsAt * 1000 <= now) continue;
+      // With no reset time to check against, only a recent reading may assert
+      // the limit; otherwise a single 100% would mark cards limited forever.
+      if (window?.resetsAt === undefined && readingAge > PLAN_READING_MAX_AGE_MS) continue;
       if (window && window.usedPercentage >= RATE_LIMIT_THRESHOLD) {
         return {
           summary: window.resetsAt
             ? `At ${label} — resets ${new Date(window.resetsAt * 1000).toISOString()}`
             : `At ${label}`,
           reason: 'plan_limit',
-          subject: label,
-          since: this.planUsageUpdatedAt ?? new Date().toISOString(),
-          ref: label,
+          subject: key,
+          since: this.planUsageUpdatedAt ?? new Date(now).toISOString(),
+          ref: key,
         };
       }
     }
@@ -405,7 +503,8 @@ export class BoardProjector {
     // A better-sourced report of the same fact corrects the existing row. Without
     // this, a tool call seen first by a hook and then by the transcript would be
     // listed twice, which is the timeline lying about how much happened.
-    const existing = event.dedupeKey ? this.timelineByKey.get(event.dedupeKey) : undefined;
+    const key = dedupeKeyOf(event);
+    const existing = key ? this.timelineByKey.get(key) : undefined;
     if (existing) {
       existing.text = text;
       if (subject !== undefined) existing.subject = subject;
@@ -423,10 +522,10 @@ export class BoardProjector {
       kind,
       text,
       ...(subject === undefined ? {} : { subject }),
-      ...(event.dedupeKey ? { dedupeKey: event.dedupeKey } : {}),
+      ...(key ? { dedupeKey: key } : {}),
     };
     this.timeline.push(entry);
-    if (event.dedupeKey) this.timelineByKey.set(event.dedupeKey, entry);
+    if (key) this.timelineByKey.set(key, entry);
 
     if (this.timeline.length > TIMELINE_LIMIT) {
       const dropped = this.timeline.slice(0, this.timeline.length - TIMELINE_LIMIT);

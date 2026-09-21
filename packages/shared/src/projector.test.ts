@@ -188,7 +188,10 @@ describe('plan limits', () => {
       ev({
         kind: 'plan.usage.updated',
         source: 'statusline',
-        payload: { usage: { fiveHour: { usedPercentage, resetsAt: 1790000000 } } },
+        // Far in the future: the overlay now consults the clock, and a reset
+        // time that passes while the suite is still in use would turn this
+        // test red on some later evening.
+        payload: { usage: { fiveHour: { usedPercentage, resetsAt: 4102444800 } } },
       }),
     );
 
@@ -196,6 +199,78 @@ describe('plan limits', () => {
     const card = cardOf(limited(100), MAIN_AGENT_ID);
     expect(card?.status.state).toBe('rate_limited');
     expect(card?.status.waitingOn?.summary).toContain('5-hour limit');
+  });
+
+  /**
+   * A reading of 100% from last night, whose window reset at 22:00, marked every
+   * card on the board "at the 5-hour limit, waiting 9h 32m" the next morning.
+   */
+  it('ignores a reading whose window has already reset', () => {
+    const projector = new BoardProjector();
+    projector.applyAll([
+      ...[
+        sessionStart(),
+        ev({ kind: 'prompt.submitted', payload: { preview: 'go', charCount: 2 } }),
+      ],
+      ev({
+        kind: 'plan.usage.updated',
+        source: 'statusline',
+        payload: { usage: { fiveHour: { usedPercentage: 100, resetsAt: 1789952400 } } },
+      }),
+    ]);
+    const before = projector.snapshot(Date.parse('2026-09-21T00:59:00Z'));
+    const after = projector.snapshot(Date.parse('2026-09-21T01:00:01Z'));
+    const main = (state: typeof before) =>
+      state.sessions[0]?.cards.find((c) => c.agentId === MAIN_AGENT_ID);
+    expect(main(before)?.status.state).toBe('rate_limited');
+    expect(main(after)?.status.state).toBe('thinking');
+  });
+
+  it('names the window by a key the interface can translate', () => {
+    expect(cardOf(limited(100), MAIN_AGENT_ID)?.status.waitingOn?.subject).toBe('fiveHour');
+  });
+
+  it("keeps the status line's spend limit when a reading without one arrives", () => {
+    const projector = new BoardProjector();
+    projector.applyAll([
+      ev({
+        kind: 'plan.usage.updated',
+        source: 'statusline',
+        ts: '2026-09-21T12:00:00.000Z',
+        payload: {
+          usage: { fiveHour: { usedPercentage: 10 }, spendLimit: { usedPercentage: 40 } },
+        },
+      }),
+      ev({
+        kind: 'plan.usage.updated',
+        source: 'usage-cache',
+        ts: '2026-09-21T12:01:00.000Z',
+        payload: { usage: { fiveHour: { usedPercentage: 12 } } },
+      }),
+    ]);
+    const usage = projector.snapshot().planUsage;
+    expect(usage?.fiveHour?.usedPercentage).toBe(12);
+    expect(usage?.spendLimit?.usedPercentage).toBe(40);
+  });
+
+  it('stops asserting a limit it cannot date once the reading is over an hour old', () => {
+    const projector = new BoardProjector();
+    projector.applyAll([
+      sessionStart(),
+      ev({ kind: 'prompt.submitted', payload: { preview: 'go', charCount: 2 } }),
+      ev({
+        kind: 'plan.usage.updated',
+        source: 'statusline',
+        ts: '2026-09-21T12:00:00.000Z',
+        payload: { usage: { fiveHour: { usedPercentage: 100 } } },
+      }),
+    ]);
+    const main = (at: string) =>
+      projector
+        .snapshot(Date.parse(at))
+        .sessions[0]?.cards.find((c) => c.agentId === MAIN_AGENT_ID);
+    expect(main('2026-09-21T12:30:00Z')?.status.state).toBe('rate_limited');
+    expect(main('2026-09-21T13:30:00Z')?.status.state).toBe('thinking');
   });
 
   it('leaves cards alone below the ceiling', () => {
@@ -285,6 +360,100 @@ describe('a card never goes blank', () => {
       sessionStart(),
       ev({ kind: 'prompt.submitted', payload: { preview: 'fix the build', charCount: 13 } }),
     );
-    expect(cardOf(state, MAIN_AGENT_ID)?.lastActivity).toBe('Prompt: fix the build');
+    // Kept raw, with a marker, so the interface can quote it in the reader's
+    // language instead of showing an English "Prompt: " prefix.
+    expect(cardOf(state, MAIN_AGENT_ID)?.lastActivity).toBe('fix the build');
+    expect(cardOf(state, MAIN_AGENT_ID)?.lastActivityKind).toBe('prompt');
+  });
+});
+
+describe('what an agent was asked to do', () => {
+  // Three subagents can all be "general-purpose" while one is the designer, one
+  // the architect and one the PM. The task is the only thing that tells them
+  // apart, and the first tool call used to overwrite it.
+  const withTask = () =>
+    board(
+      sessionStart(),
+      ev({
+        kind: 'agent.started',
+        agentId: 'a1',
+        parentAgentId: MAIN_AGENT_ID,
+        payload: {
+          agentType: 'general-purpose',
+          spawnMode: 'async',
+          description: 'Designer: tutoriais interativos',
+        },
+      }),
+    );
+
+  it('is kept on the card', () => {
+    expect(cardOf(withTask(), 'a1')?.task).toBe('Designer: tutoriais interativos');
+  });
+
+  it('survives the agent running a tool', () => {
+    const state = board(
+      sessionStart(),
+      ev({
+        kind: 'agent.started',
+        agentId: 'a1',
+        parentAgentId: MAIN_AGENT_ID,
+        payload: {
+          agentType: 'general-purpose',
+          spawnMode: 'async',
+          description: 'Designer: tutoriais interativos',
+        },
+      }),
+      ev({
+        kind: 'tool.started',
+        agentId: 'a1',
+        payload: { toolUseId: 't1', toolName: 'Grep', summary: 'button' },
+      }),
+    );
+    expect(cardOf(state, 'a1')?.task).toBe('Designer: tutoriais interativos');
+    expect(cardOf(state, 'a1')?.activity).toBe('Grep: button');
+  });
+
+  it('is absent when the agent was launched without one', () => {
+    expect(cardOf(board(sessionStart(), spawn('a2', 'async')), 'a2')?.task).toBeUndefined();
+  });
+});
+
+describe('an agent Mirante only saw finish', () => {
+  // Its SubagentStop arrived but nothing else: it started while the daemon was
+  // not listening. There is no type, no task, no tokens and no duration.
+  const finishOnly = () =>
+    board(
+      sessionStart(),
+      ev({
+        kind: 'agent.finished',
+        agentId: 'ghost-1',
+        parentAgentId: MAIN_AGENT_ID,
+        source: 'hook',
+        payload: { outcome: 'ok', handedBackTo: MAIN_AGENT_ID },
+      }),
+    );
+
+  it('does not become an empty card', () => {
+    // A box with an opaque id for a name and zeroes for every number is worse
+    // than not showing it.
+    expect(cardOf(finishOnly(), 'ghost-1')).toBeUndefined();
+  });
+
+  it('is still recorded, so the timeline does not lie by omission', () => {
+    expect(finishOnly().timeline.some((entry) => entry.kind === 'handoff.end')).toBe(true);
+  });
+
+  it('leaves a properly observed agent alone', () => {
+    const state = board(
+      sessionStart(),
+      spawn('a1', 'async', 'Explore'),
+      ev({
+        kind: 'agent.finished',
+        agentId: 'a1',
+        parentAgentId: MAIN_AGENT_ID,
+        payload: { outcome: 'ok', handedBackTo: MAIN_AGENT_ID },
+      }),
+    );
+    expect(cardOf(state, 'a1')?.status.state).toBe('done');
   });
 });

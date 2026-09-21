@@ -28,3 +28,23 @@ export const isInjectedMessage = (text: string): boolean => {
   const head = text.trimStart();
   return INJECTED_MESSAGE_PREFIXES.some((prefix) => head.startsWith(prefix));
 };
+
+/**
+ * Editor context the VS Code extension puts ahead of a prompt: the file that was
+ * open, the lines that were selected.
+ *
+ * It rides in the same entry as what the person typed, first, so a preview cut
+ * at a fixed length shows only the editor's note and never the request — and
+ * that note can name a file like `.env`. An unterminated tag, which is what a
+ * cut preview leaves behind, is stripped to the end.
+ */
+const EDITOR_CONTEXT = /<(ide_[a-z_]+)>[\s\S]*?(?:<\/\1>|$)/g;
+
+export const stripEditorContext = (text: string): string => text.replace(EDITOR_CONTEXT, '').trim();
+
+/** What a person actually asked, or `undefined` when an entry carries no request. */
+export const requestText = (text: string): string | undefined => {
+  if (isInjectedMessage(text)) return undefined;
+  const cleaned = stripEditorContext(text);
+  return cleaned.length > 0 ? cleaned : undefined;
+};

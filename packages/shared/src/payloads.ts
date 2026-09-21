@@ -129,7 +129,18 @@ export const waitingChangedPayload = z.object({
 });
 
 export const errorRaisedPayload = z.object({
-  kind: z.enum(['api', 'tool', 'parse', 'internal']),
+  kind: z.enum(['api', 'tool', 'parse', 'internal', 'rate_limit']),
   message: previewSchema,
   recoverable: z.boolean().optional(),
+  /**
+   * For a plan-limit refusal: which window stopped the turn, and when it reopens.
+   * `window` is `fiveHour`, `sevenDay`, or Claude Code's own name for one Mirante
+   * does not know yet.
+   */
+  limit: z
+    .object({
+      window: z.string().min(1).optional(),
+      resetsAt: z.number().int().positive().optional(),
+    })
+    .optional(),
 });

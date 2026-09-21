@@ -36,7 +36,17 @@ export type EventKind = z.infer<typeof eventKindSchema>;
  * it — that prohibition is what allows driver mode to be added later without
  * forking the UI. See ADR-0001.
  */
-export const eventSourceSchema = z.enum(['hook', 'transcript', 'statusline', 'otel', 'sdk']);
+export const eventSourceSchema = z.enum([
+  'hook',
+  'transcript',
+  'statusline',
+  'usage-command',
+  // Claude Code's cached plan figure, read from its state file. Its own source so
+  // the log does not claim a command ran every minute when a file was read.
+  'usage-cache',
+  'otel',
+  'sdk',
+]);
 export type EventSource = z.infer<typeof eventSourceSchema>;
 
 /** How the session was launched. Separates terminal lanes from VS Code lanes on the board. */

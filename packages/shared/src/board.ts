@@ -16,6 +16,15 @@ export type AgentCard = {
   agentId: string;
   sessionId: string;
   agentType?: string;
+  /**
+   * What this agent was actually asked to do.
+   *
+   * An agent's type is often generic — three subagents can all be
+   * "general-purpose" while one is the designer, one the architect and one the
+   * PM. The task is the only thing on the card that tells them apart, so it is
+   * kept separately from activity, which the first tool call would overwrite.
+   */
+  task?: string;
   parentAgentId?: string;
   status: CardStatus;
   /** The single line under the card title: what this agent is doing right now. */
@@ -27,6 +36,12 @@ export type AgentCard = {
    * time a card is looked at — "Thinking" on its own answers nothing.
    */
   lastActivity?: string;
+  /**
+   * Set when `lastActivity` is what the person typed, rather than something the
+   * agent did. The interface quotes it and says "your last message"; building
+   * a "Prompt: …" string here would fix it in one language.
+   */
+  lastActivityKind?: 'prompt';
   currentTool?: RunningTool;
   activeSkill?: string;
   model?: string;
@@ -41,6 +56,21 @@ export type AgentCard = {
    * waiting state. They are a count badge instead. See docs/EVENT_MAP.md §6 D3.
    */
   runningChildren: number;
+  /**
+   * Set when the card stopped because a plan limit refused the request.
+   *
+   * "Turn ended with an error" is true and useless: the actual answer is which
+   * window, and when it reopens — which is also when the work can resume.
+   */
+  stoppedAtLimit?: { window?: string; resetsAt?: number };
+  /**
+   * ISO 8601. The last event this card received, from any source.
+   *
+   * A card's state is only as good as the last signal behind it. When a finish
+   * is lost — a hook fired while the daemon was down — a card says "running"
+   * forever; this is what lets the interface notice it has gone quiet.
+   */
+  lastEventAt?: string;
 };
 
 /** One session: a lane on the board. */

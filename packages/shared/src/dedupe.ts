@@ -22,6 +22,11 @@ export const dedupeKeys = {
   permissionResolved: (requestId: string) => `permission.resolved:${requestId}`,
   /** Usage is reported per assistant message; the transcript entry uuid identifies it. */
   usageForMessage: (messageUuid: string) => `usage.updated:${messageUuid}`,
+  errorForMessage: (messageUuid: string) => `error.raised:${messageUuid}`,
+  /** One cached figure, however many times it is read: Claude Code stamps each write. */
+  planUsageCache: (fetchedAtMs: number) => `plan.usage.cache:${fetchedAtMs}`,
+  turnFailed: (sessionId: string, agentId: string, promptId: string) =>
+    `turn.failed:${sessionId}:${agentId}:${promptId}`,
 } as const;
 
 /**
@@ -35,6 +40,10 @@ const SOURCE_PRECEDENCE: Record<EventSource, number> = {
   transcript: 40,
   sdk: 30,
   otel: 20,
+  // The `/usage` command is pulled on demand and timestamped at the moment it
+  // ran, so it supersedes a status line reading that was pushed earlier.
+  'usage-command': 25,
+  'usage-cache': 25,
   statusline: 15,
   hook: 10,
 };
@@ -44,3 +53,23 @@ export const sourceOutranks = (incoming: EventSource, existing: EventSource): bo
 
 export const shouldSupersede = (incoming: DraftEvent, existing: DraftEvent): boolean =>
   sourceOutranks(incoming.source, existing.source);
+
+/**
+ * The key an event is collapsed by.
+ *
+ * A failed turn is reported twice — by the StopFailure hook and by the
+ * transcript's refusal entry — and the two share nothing but the session, the
+ * agent and the turn. Deriving the key from those, rather than trusting what was
+ * stored, also collapses pairs written before this rule existed: the log is
+ * append-only, so the fix has to hold on read.
+ */
+export const dedupeKeyOf = (event: {
+  kind: string;
+  sessionId: string;
+  agentId: string;
+  promptId?: string | undefined;
+  dedupeKey?: string | undefined;
+}): string | undefined =>
+  event.kind === 'error.raised' && event.promptId
+    ? dedupeKeys.turnFailed(event.sessionId, event.agentId, event.promptId)
+    : event.dedupeKey;

@@ -53,6 +53,15 @@ export const planWindowSchema = z.object({
 });
 export type PlanWindow = z.infer<typeof planWindowSchema>;
 
+/**
+ * How long a plan reading can stand for the present.
+ *
+ * Claude Code's own figure: it stops trusting its cached reading after an hour.
+ * The daemon refuses older cached figures, the overlay stops asserting a limit
+ * it cannot date, and the interface marks older readings as stale.
+ */
+export const PLAN_READING_MAX_AGE_MS = 60 * 60 * 1000;
+
 export const planUsageSchema = z.object({
   fiveHour: planWindowSchema.optional(),
   sevenDay: planWindowSchema.optional(),
