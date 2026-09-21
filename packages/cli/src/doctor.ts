@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { EventLog, loadConfig, readToken, type MiranteConfig } from '@mirante/daemon';
-import { locateSessions } from '@mirante/daemon';
+import { locateSessions, readCachedUsageFile, type CacheFailure } from '@mirante/daemon';
 import { readManifest, readSettings } from '@mirante/installer';
 import { check, heading, line, ui } from './ui.js';
 
@@ -183,7 +183,9 @@ export const doctor = async (overrides: Partial<MiranteConfig> = {}): Promise<nu
             'Status line reporting',
             '0 events — every session seen so far runs in an editor, and the status line runs in the terminal',
           );
-          check('info', 'To get plan usage and cost', 'run `claude` in a terminal at least once');
+          // Plan usage no longer needs the terminal (see the check below); the
+          // session's cost still reaches Mirante only through the status line.
+          check('info', 'To get cost per session', 'run `claude` in a terminal at least once');
         } else {
           check(
             'warn',
@@ -192,6 +194,13 @@ export const doctor = async (overrides: Partial<MiranteConfig> = {}): Promise<nu
           );
         }
       }
+
+      const fromCache = bySource.get('usage-cache') ?? 0;
+      check(
+        fromCache > 0 ? 'pass' : 'info',
+        'Plan figure read automatically',
+        `${fromCache} readings — /usage runs once a minute while an agent is working`,
+      );
 
       const sawPlanUsage = events.some((event) => event.kind === 'plan.usage.updated');
       if (sawPlanUsage) {
@@ -210,6 +219,9 @@ export const doctor = async (overrides: Partial<MiranteConfig> = {}): Promise<nu
     }
   }
 
+  heading('Plan limits');
+  planCacheCheck(config.claudeStatePath);
+
   line();
   line(
     failures === 0
@@ -217,4 +229,53 @@ export const doctor = async (overrides: Partial<MiranteConfig> = {}): Promise<nu
       : ui.red(`${failures} problem${failures === 1 ? '' : 's'} to fix.`),
   );
   return failures === 0 ? 0 : 1;
+};
+
+/**
+ * Why the plan meters would read "unknown", named precisely.
+ *
+ * The daemon reads the figure Claude Code caches in its state file every minute.
+ * When that fails the board can only say "unknown"; this says which of the
+ * failures it is. It prints nothing from the file but the two windows — the same
+ * file holds the account's email.
+ */
+const CACHE_ADVICE: Record<CacheFailure, [level: 'warn' | 'info', message: string]> = {
+  missing: [
+    'info',
+    'no plan figure cached yet — it appears after Claude Code answers once on a Pro or Max plan',
+  ],
+  unreadable: [
+    'warn',
+    'not found or not readable — if Claude Code uses another directory, set CLAUDE_CONFIG_DIR',
+  ],
+  stale: [
+    'info',
+    'older than an hour — no agent has worked since, and it is read only while one does',
+  ],
+  empty: ['info', 'no plan windows — an API-key account, or no subscription'],
+  'too-large': ['warn', 'the state file is over 16 MB, so it is not read'],
+  clock: ['warn', "stamped in the future — this machine's clock was set back"],
+  'other-account': [
+    'warn',
+    'cached for a different account than the one signed in; it refreshes on the next reply',
+  ],
+};
+
+const planCacheCheck = (statePath: string): void => {
+  const read = readCachedUsageFile(statePath);
+  if (read.ok) {
+    const { fiveHour, sevenDay } = read.reading.usage;
+    const minutes = Math.round((Date.now() - read.reading.fetchedAtMs) / 60_000);
+    const figures = [
+      fiveHour ? `5-hour ${fiveHour.usedPercentage}%` : undefined,
+      sevenDay ? `weekly ${sevenDay.usedPercentage}%` : undefined,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    check('pass', 'Plan figure readable', `${figures}, fetched ${minutes} min ago`);
+    return;
+  }
+  const [level, message] = CACHE_ADVICE[read.reason];
+  check(level, 'Plan figure', message);
+  check('info', 'Looked in', statePath);
 };
