@@ -15,10 +15,13 @@ export const usageSchema = z
     output_tokens: z.number().optional(),
     cache_creation_input_tokens: z.number().optional(),
     cache_read_input_tokens: z.number().optional(),
+    // `null` on the synthetic entry Claude Code writes for an API refusal.
+    // Rejecting it dropped every such entry as unreadable, which is why a
+    // rate-limit hit never reached the board. See docs/EVENT_MAP.md §8.
     output_tokens_details: z
       .object({ thinking_tokens: z.number().optional() })
       .passthrough()
-      .optional(),
+      .nullish(),
     // `iterations` is deliberately not read: it restates these same totals and
     // summing it double-counts. See docs/EVENT_MAP.md §4.
   })
@@ -88,6 +91,19 @@ export const transcriptEntrySchema = z
     sourceToolAssistantUUID: z.string().nullish(),
     toolUseResult: z.unknown().optional(),
     message: messageSchema.optional(),
+    /** Set on the synthetic entry Claude Code writes when the API refused a request. */
+    isApiErrorMessage: z.boolean().optional(),
+    /** `rate_limit` for a plan-limit refusal. */
+    error: z.string().optional(),
+    /** Which window refused, and when it reopens. See docs/EVENT_MAP.md §8. */
+    quotaLimits: z
+      .object({
+        status: z.string().optional(),
+        rateLimitType: z.string().optional(),
+        resetsAt: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
 

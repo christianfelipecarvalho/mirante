@@ -25,6 +25,12 @@ export const hookPayloadSchema = z
     tool_response: z.unknown().optional(),
     prompt: z.string().optional(),
     message: z.string().optional(),
+    /** StopFailure: the error category, e.g. `rate_limit`. */
+    error: z.string().optional(),
+    /** StopFailure: shape undocumented; used only when it is a string. */
+    error_details: z.unknown().optional(),
+    /** StopFailure: the line the person saw, e.g. "You've hit your session limit…". */
+    last_assistant_message: z.string().optional(),
     /** Notification subtype: permission_prompt, idle_prompt, agent_needs_input, quota_auto_resume_*. */
     notification_type: z.string().optional(),
     source: z.string().optional(),
@@ -233,7 +239,9 @@ export const hookToEvents = (payload: HookPayload, context: HookContext = {}): D
             ...base,
             kind: 'error.raised',
             payload: {
-              kind: 'api',
+              // A usage-limit notice, not an API fault: filed as `api` it read
+              // "API error" in the activity log.
+              kind: 'rate_limit',
               message: preview(payload.message ?? `Usage limit: ${type}`),
               recoverable: true,
             },
@@ -270,14 +278,23 @@ export const hookToEvents = (payload: HookPayload, context: HookContext = {}): D
         },
       ];
 
-    case 'StopFailure':
+    case 'StopFailure': {
+      // Observed fields: `error`, `error_details`, `last_assistant_message`.
+      // `message`, which this read before, is not on this hook at all, so every
+      // failure arrived as the same sentence. See docs/EVENT_MAP.md D10.
+      const details = typeof payload.error_details === 'string' ? payload.error_details : undefined;
+      const said = payload.last_assistant_message ?? details ?? payload.error;
       return [
         {
           ...base,
           kind: 'error.raised',
-          payload: { kind: 'api', message: preview(payload.message ?? 'Turn ended with an error') },
+          payload: {
+            kind: payload.error === 'rate_limit' ? 'rate_limit' : 'api',
+            message: preview(said ?? 'Turn ended with an error'),
+          },
         },
       ];
+    }
 
     case 'PreCompact':
     case 'PostCompact':

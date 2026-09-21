@@ -1,5 +1,5 @@
 import type { DraftEvent, Entrypoint } from '@mirante/shared';
-import { MAIN_AGENT_ID, dedupeKeys, isInjectedMessage } from '@mirante/shared';
+import { MAIN_AGENT_ID, dedupeKeys, isInjectedMessage, stripEditorContext } from '@mirante/shared';
 import { preview, summarizeToolInput } from '../../core/redact.js';
 import {
   agentToolResultSchema,
@@ -101,6 +101,44 @@ const promptText = (entry: TranscriptEntry): string => {
     .join('\n');
 };
 
+const TASK_NOTIFICATION =
+  /<task-notification>[\s\S]*?<task-id>([^<]+)<\/task-id>[\s\S]*?<status>([^<]+)<\/status>/;
+
+const OUTCOME_BY_STATUS: Record<string, 'ok' | 'error' | 'interrupted'> = {
+  completed: 'ok',
+  failed: 'error',
+  killed: 'interrupted',
+  stopped: 'interrupted',
+  cancelled: 'interrupted',
+};
+
+/**
+ * A subagent's end, as Claude Code reports it to the parent.
+ *
+ * It arrives as a queued command in an `attachment` entry, and sometimes also as
+ * a plain user entry. Everything else about the entry is bookkeeping, which is
+ * why the conversational pass never sees it.
+ */
+const taskNotificationOf = (
+  entry: TranscriptEntry,
+): { taskId: string; outcome: 'ok' | 'error' | 'interrupted' } | undefined => {
+  const attachment = (entry as { attachment?: unknown }).attachment;
+  const text =
+    entry.type === 'attachment' && typeof attachment === 'object' && attachment !== null
+      ? (attachment as { prompt?: unknown }).prompt
+      : entry.type === 'user'
+        ? promptText(entry)
+        : undefined;
+  if (typeof text !== 'string') return undefined;
+  const match = TASK_NOTIFICATION.exec(text);
+  const outcome = match?.[2] ? OUTCOME_BY_STATUS[match[2].trim()] : undefined;
+  return match?.[1] && outcome ? { taskId: match[1].trim(), outcome } : undefined;
+};
+
+/** Claude Code's window names, mapped onto the keys the rest of Mirante uses. */
+const windowKey = (raw: string): string =>
+  raw === 'five_hour' ? 'fiveHour' : raw === 'seven_day' ? 'sevenDay' : raw;
+
 const isFailedResult = (entry: TranscriptEntry): boolean => {
   const result = entry.toolUseResult;
   if (typeof result === 'object' && result !== null) {
@@ -195,6 +233,34 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     }
 
     if (entry.type === 'assistant') {
+      // A refusal from the API, written by Claude Code itself: the model never
+      // ran, the usage is all zeros, and the only content is the reason.
+      if (entry.isApiErrorMessage === true) {
+        const limited = entry.error === 'rate_limit';
+        const window = entry.quotaLimits?.rateLimitType;
+        const resetsAt = entry.quotaLimits?.resetsAt;
+        events.push({
+          ...base(entry),
+          kind: 'error.raised',
+          ...(entry.uuid === undefined
+            ? {}
+            : { dedupeKey: dedupeKeys.errorForMessage(entry.uuid) }),
+          payload: {
+            kind: limited ? 'rate_limit' : 'api',
+            message: preview(promptText(entry) || entry.error || 'API error'),
+            ...(limited && (window !== undefined || resetsAt !== undefined)
+              ? {
+                  limit: {
+                    ...(window === undefined ? {} : { window: windowKey(window) }),
+                    ...(resetsAt === undefined ? {} : { resetsAt: Math.floor(resetsAt) }),
+                  },
+                }
+              : {}),
+          },
+        });
+        return;
+      }
+
       if (entry.message?.usage) {
         events.push({
           ...base(entry),
@@ -233,7 +299,9 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     if (entry.type !== 'user') return;
 
     if (isHumanPrompt(entry)) {
-      const text = promptText(entry);
+      // Editor context comes first in the entry; without stripping it the
+      // preview holds only "The user opened the file …" and never the request.
+      const text = stripEditorContext(promptText(entry));
       events.push({
         ...base(entry),
         kind: 'prompt.submitted',
@@ -368,6 +436,26 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
   const shared = { toolNameById, spawnInfoByToolUseId, agentTypeByAgentId, warnings };
   const events = emitForEntries(main.entries, { agentId: MAIN_AGENT_ID, ...shared });
 
+  // The authoritative end of each subagent, keyed by agent id. Only ids that are
+  // subagents of this session count: the same notification also reports
+  // background shells, which are not agents and have no card.
+  const known = new Set(subagents.map((sub) => sub.agentId));
+  // The notification entry carries a timestamp and nothing else about where it
+  // belongs — no sessionId, no cwd. Those come from the session's own entries.
+  const identity = main.entries.find(
+    (entry) => (entry.type === 'user' || entry.type === 'assistant') && entry.sessionId,
+  );
+  const notified = new Map<
+    string,
+    { entry: TranscriptEntry; outcome: 'ok' | 'error' | 'interrupted' }
+  >();
+  for (const entry of main.entries) {
+    const note = taskNotificationOf(entry);
+    if (note && known.has(note.taskId) && !notified.has(note.taskId)) {
+      notified.set(note.taskId, { entry, outcome: note.outcome });
+    }
+  }
+
   for (const sub of subagents) {
     const meta = sub.meta as SubagentMeta;
     const parentAgentId = meta.toolUseId ? ownerByToolUseId.get(meta.toolUseId) : undefined;
@@ -390,6 +478,25 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
     // `end_turn` is a finished agent. The SubagentStop hook is authoritative when
     // the daemon was running; this is what makes replay-from-disk work when it
     // was not.
+    // The notification below is authoritative. This heuristic also misses every
+    // subagent that hands back through a tool rather than a final message.
+    const note = notified.get(sub.agentId);
+    if (note && (identity?.sessionId ?? note.entry.sessionId)) {
+      events.push({
+        ts: note.entry.timestamp ?? new Date(0).toISOString(),
+        source: 'transcript',
+        sessionId: identity?.sessionId ?? note.entry.sessionId ?? '',
+        projectPath: identity?.cwd ?? note.entry.cwd ?? '',
+        agentId: sub.agentId,
+        ...(meta.agentType === undefined ? {} : { agentType: meta.agentType }),
+        parentAgentId: parentAgentId ?? MAIN_AGENT_ID,
+        kind: 'agent.finished',
+        dedupeKey: dedupeKeys.agentFinished(sub.agentId),
+        payload: { outcome: note.outcome, handedBackTo: parentAgentId ?? MAIN_AGENT_ID },
+      });
+      continue;
+    }
+
     const last = sub.entries.at(-1);
     if (last?.type === 'assistant' && last.message?.stop_reason === 'end_turn') {
       events.push({
