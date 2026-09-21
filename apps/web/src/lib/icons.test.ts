@@ -33,3 +33,27 @@ describe('agent icons', () => {
     expect(agentIcon('explore', 'a1', { explore: 'globe' })).toBe('globe');
   });
 });
+
+describe('an agent whose type says nothing', () => {
+  // Three subagents can all be "general-purpose"; the task is what distinguishes
+  // the designer from the architect from the PM.
+  it('takes its mark from the task it was given', () => {
+    // A drafting compass is an architect, a kanban board is product work, a
+    // palette is design — the vocabulary people already read.
+    expect(agentIcon('general-purpose', 'a1', {}, 'Designer: tutoriais')).toBe('palette');
+    expect(agentIcon('general-purpose', 'a2', {}, 'Arquiteto: tutoriais')).toBe('compass');
+    expect(agentIcon('general-purpose', 'a3', {}, 'PM/PO: tutoriais')).toBe('board');
+  });
+
+  it('reads accented Portuguese the same as plain', () => {
+    expect(agentIcon('general-purpose', 'a1', {}, 'Revisão de segurança')).toBe('shield');
+  });
+
+  it('ignores the task when the type already says something', () => {
+    expect(agentIcon('security-reviewer', 'a1', {}, 'Designer: algo')).toBe('shield');
+  });
+
+  it('falls back to its own mark when the task says nothing either', () => {
+    expect(agentIcon('general-purpose', 'a1', {}, 'faz a coisa toda')).toBe('agent');
+  });
+});

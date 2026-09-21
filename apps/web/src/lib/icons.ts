@@ -12,6 +12,14 @@ import type { IconName } from './icon-set.js';
  */
 const FALLBACK: readonly IconName[] = ['agent', 'box', 'layout', 'server', 'beaker', 'map'];
 
+/**
+ * Agent types that say nothing about the work.
+ *
+ * When the type is one of these, the task the agent was given is a better
+ * source for its mark than the type is.
+ */
+const GENERIC_TYPES = new Set(['general-purpose', 'general', 'claude', 'agent', 'task']);
+
 const BY_ROLE: Record<string, IconName> = {
   main: 'session',
   explore: 'search',
@@ -20,7 +28,7 @@ const BY_ROLE: Record<string, IconName> = {
   general: 'agent',
   'general-purpose': 'agent',
   claude: 'agent',
-  review: 'check',
+  review: 'magnify',
   security: 'shield',
   audit: 'shield',
   test: 'beaker',
@@ -28,15 +36,35 @@ const BY_ROLE: Record<string, IconName> = {
   docs: 'file',
   doc: 'file',
   write: 'pencil',
-  frontend: 'layout',
+  frontend: 'window',
   web: 'layout',
-  ui: 'layout',
+  ui: 'palette',
   backend: 'server',
   api: 'server',
-  data: 'server',
-  build: 'box',
-  deploy: 'box',
+  data: 'database',
+  build: 'package',
+  deploy: 'package',
   guide: 'guide',
+  // Words that show up in task descriptions rather than in type names, in both
+  // languages this interface speaks.
+  designer: 'palette',
+  design: 'palette',
+  arquiteto: 'compass',
+  architect: 'compass',
+  arquitetura: 'compass',
+  pm: 'board',
+  po: 'board',
+  product: 'board',
+  produto: 'board',
+  revisor: 'magnify',
+  revisao: 'magnify',
+  reviewer: 'magnify',
+  seguranca: 'shield',
+  teste: 'beaker',
+  testes: 'beaker',
+  documentacao: 'file',
+  banco: 'database',
+  dba: 'database',
 };
 
 /**
@@ -69,15 +97,27 @@ const SPECIFICITY: Record<string, number> = {
   deploy: 2,
   guide: 2,
   security: 3,
+  seguranca: 3,
   frontend: 3,
   backend: 3,
   ui: 3,
+  designer: 3,
+  arquiteto: 3,
+  architect: 3,
+  dba: 3,
 };
 
+/**
+ * Words in a type or a task.
+ *
+ * Splits on every separator these strings actually use, not just hyphens:
+ * `PM/PO: tutoriais` has to yield `pm` and `po`, and it did not while `/` and
+ * `:` were treated as word characters.
+ */
 const segmentsOf = (value: string): string[] =>
   value
     .toLowerCase()
-    .split(/[-_\s.]+/)
+    .split(/[^a-z0-9]+/)
     .filter(Boolean);
 
 const hash = (value: string): number => {
@@ -89,31 +129,51 @@ const hash = (value: string): number => {
   return Math.abs(h);
 };
 
+/** Strips accents so `segurança` and `seguranca` are the same word. */
+const fold = (value: string): string =>
+  value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+const bestRoleIn = (text: string): { icon: IconName; rank: number } | undefined => {
+  let best: { icon: IconName; rank: number } | undefined;
+  for (const segment of segmentsOf(fold(text))) {
+    // A segment can also be an inflection: "reviewer" is a review.
+    const role = BY_ROLE[segment]
+      ? segment
+      : Object.keys(BY_ROLE).find((needle) => needle.length > 3 && segment.startsWith(needle));
+    if (!role) continue;
+    const rank = SPECIFICITY[role] ?? 2;
+    if (!best || rank > best.rank) best = { icon: BY_ROLE[role] as IconName, rank };
+  }
+  return best;
+};
+
 export const agentIcon = (
   agentType: string | undefined,
   agentId: string,
   overrides: Record<string, IconName> = {},
+  /** What the agent was asked to do, used when its type is uninformative. */
+  task?: string,
 ): IconName => {
   if (agentId === 'main') return 'session';
   // No type at all means the agent was already running before Mirante saw it.
   // Inventing a mark would imply an identity it does not have.
   if (!agentType) return 'unknown';
 
-  const key = agentType.toLowerCase();
+  const key = fold(agentType);
   if (overrides[key]) return overrides[key] as IconName;
-  if (BY_ROLE[key]) return BY_ROLE[key] as IconName;
 
-  let best: { icon: IconName; rank: number } | undefined;
-  for (const segment of segmentsOf(key)) {
-    // A segment can also be an inflection: "reviewer" is a review.
-    const role = BY_ROLE[segment]
-      ? segment
-      : Object.keys(BY_ROLE).find((needle) => needle.length > 3 && segment.startsWith(needle));
-    if (!role) continue;
-    const rank = SPECIFICITY[role] ?? 1;
-    if (!best || rank > best.rank) best = { icon: BY_ROLE[role] as IconName, rank };
+  // A generic type tells you nothing; the task the agent was given does.
+  if (task && GENERIC_TYPES.has(key)) {
+    const fromTask = bestRoleIn(task);
+    if (fromTask) return fromTask.icon;
   }
-  if (best) return best.icon;
+
+  if (BY_ROLE[key]) return BY_ROLE[key] as IconName;
+  const fromType = bestRoleIn(key);
+  if (fromType) return fromType.icon;
 
   return FALLBACK[hash(key) % FALLBACK.length] as IconName;
 };

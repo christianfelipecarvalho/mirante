@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAIN_AGENT_ID, type MiranteEvent } from '@mirante/shared';
-import { buildTurns, latestTurn } from './turns.js';
-import { buildSteps } from './steps.js';
+import { buildTurns, isFollowUp, latestRequest, latestTurn } from './turns.js';
+import { buildSteps, groupStepsByTurn } from './steps.js';
 
 let nextId = 0;
 const ev = (
@@ -224,6 +224,96 @@ describe('machine chatter already in the log', () => {
     expect(turns[0]?.prompt).toBe('');
   });
 
+  it("costs a turn as the session total's rise across it", () => {
+    const sessionCost = (promptId: string, costUsd: number) =>
+      ev({
+        kind: 'usage.updated',
+        promptId,
+        source: 'statusline',
+        payload: { scope: 'session', tokens: tokens(0), costUsd },
+      });
+    const events = [
+      ev({ kind: 'prompt.submitted', promptId: 't1', payload: { preview: 'one', charCount: 3 } }),
+      sessionCost('t1', 1.0),
+      ev({ kind: 'prompt.submitted', promptId: 't2', payload: { preview: 'two', charCount: 3 } }),
+      sessionCost('t2', 1.42),
+    ];
+    const turns = buildTurns(events, 'sess-1');
+    const first = turns.find((turn) => turn.promptId === 't1');
+    const second = turns.find((turn) => turn.promptId === 't2');
+    // No reading before the first turn, so no baseline: unknown, not $1.00.
+    expect(first?.costUsd).toBeUndefined();
+    expect(second?.costUsd).toBeCloseTo(0.42);
+  });
+
+  it('is picked by time, not by the order it reached the log', () => {
+    // The transcript watcher re-reads old sessions, so a prompt from weeks ago
+    // can land after one typed a minute ago.
+    const events = [
+      ev({
+        kind: 'prompt.submitted',
+        promptId: 'today',
+        ts: '2026-09-21T09:00:00.000Z',
+        payload: { preview: 'today', charCount: 5 },
+      }),
+      ev({
+        kind: 'prompt.submitted',
+        promptId: 'weeks-ago',
+        ts: '2026-09-03T23:17:35.000Z',
+        payload: { preview: 'weeks ago', charCount: 9 },
+      }),
+    ];
+    expect(latestTurn(events)?.turn.prompt).toBe('today');
+  });
+
+  it("ignores a subagent's brief, which its parent wrote", () => {
+    const events = [
+      ev({ kind: 'prompt.submitted', promptId: 'p1', payload: { preview: 'mine', charCount: 4 } }),
+      ev({
+        kind: 'prompt.submitted',
+        agentId: 'a1',
+        // Observed: the subagent's first entry carries its parent's prompt id.
+        promptId: 'p1',
+        payload: { preview: 'Review a real dashboard', charCount: 23 },
+      }),
+    ];
+    expect(latestTurn(events)?.turn.prompt).toBe('mine');
+  });
+
+  it('shows what was typed, not the note about which file was open', () => {
+    const events = [
+      ev({
+        kind: 'prompt.submitted',
+        promptId: 'p1',
+        payload: {
+          preview:
+            '<ide_opened_file>The user opened the file /w/.env in the IDE.</ide_opened_file> fix the login',
+          charCount: 90,
+        },
+      }),
+    ];
+    expect(latestTurn(events)?.turn.prompt).toBe('fix the login');
+  });
+
+  it('skips a prompt that is nothing but a cut-off editor note', () => {
+    const events = [
+      ev({
+        kind: 'prompt.submitted',
+        promptId: 'p1',
+        payload: { preview: 'earlier', charCount: 7 },
+      }),
+      ev({
+        kind: 'prompt.submitted',
+        promptId: 'p2',
+        payload: {
+          preview: '<ide_opened_file>The user opened the file /w/.env in the',
+          charCount: 400,
+        },
+      }),
+    ];
+    expect(latestTurn(events)?.turn.prompt).toBe('earlier');
+  });
+
   it('is not picked as the latest request', () => {
     const events = [
       ev({
@@ -236,9 +326,13 @@ describe('machine chatter already in the log', () => {
     expect(latestTurn(events)?.turn.prompt).toBe('real one');
   });
 
-  it('does not become a step in the activity stream', () => {
+  it('never becomes a row in the activity stream, only the origin of its turn', () => {
     const steps = buildSteps([injected('<system-reminder> do the thing')], { sessionId: 'sess-1' });
-    expect(steps.filter((step) => step.kind === 'prompt')).toEqual([]);
+    // Kept, marked, and never drawn: it only says what opened the turn.
+    expect(steps.every((step) => step.injected === true)).toBe(true);
+    const [group] = groupStepsByTurn(steps);
+    expect(group?.steps).toEqual([]);
+    expect(group?.origin).toBe('system');
   });
 
   it('leaves a real prompt that merely mentions a tag alone', () => {
@@ -253,4 +347,53 @@ describe('machine chatter already in the log', () => {
     );
     expect(steps).toHaveLength(1);
   });
+});
+
+describe('latestRequest', () => {
+  const prompt = (promptId: string, preview: string) =>
+    ev({ kind: 'prompt.submitted', promptId, payload: { preview, charCount: preview.length } });
+  const work = (promptId: string, output: number) =>
+    ev({ kind: 'usage.updated', promptId, payload: { scope: 'agent', tokens: tokens(output) } });
+
+  it('headlines the request a follow-up continues, not the follow-up', () => {
+    const result = latestRequest([
+      prompt('p1', 'Rework the header so the limits lead'),
+      work('p1', 100),
+      prompt('p2', 'Continue'),
+      work('p2', 50),
+      prompt('p3', 'sim'),
+    ]);
+    expect(result?.turn.prompt).toBe('Rework the header so the limits lead');
+    expect(result?.followUps.map((turn) => turn.prompt)).toEqual(['Continue', 'sim']);
+    // The chain is costed as a whole: 1 input + output, per turn with usage.
+    expect(result?.tokens.output).toBe(150);
+  });
+
+  it('shows a substantive request as itself', () => {
+    const result = latestRequest([
+      prompt('p1', 'Continue'),
+      prompt('p2', 'Chame os especialistas'),
+    ]);
+    expect(result?.turn.prompt).toBe('Chame os especialistas');
+    expect(result?.followUps).toEqual([]);
+  });
+
+  it('falls back to the follow-up when nothing came before it', () => {
+    expect(latestRequest([prompt('p1', 'Continue')])?.turn.prompt).toBe('Continue');
+  });
+});
+
+describe('isFollowUp', () => {
+  it.each(['Continue', 'sim', 'Sim!', 'pode seguir', 'Pode começar', '.', 'Perfeito'])(
+    'treats %j as a follow-up',
+    (text) => {
+      expect(isFollowUp(text)).toBe(true);
+    },
+  );
+  it.each(['Chame os especialistas', 'fix the build', 'ok faça isso agora com o botão'])(
+    'treats %j as a request',
+    (text) => {
+      expect(isFollowUp(text)).toBe(false);
+    },
+  );
 });

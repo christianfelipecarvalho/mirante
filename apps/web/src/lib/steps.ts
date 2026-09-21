@@ -1,4 +1,11 @@
-import { isInjectedMessage, sourceOutranks, type MiranteEvent } from '@mirante/shared';
+import {
+  MAIN_AGENT_ID,
+  dedupeKeyOf,
+  isInjectedMessage,
+  requestText,
+  sourceOutranks,
+  type MiranteEvent,
+} from '@mirante/shared';
 
 /**
  * One readable line of what an agent did.
@@ -11,7 +18,11 @@ import { isInjectedMessage, sourceOutranks, type MiranteEvent } from '@mirante/s
 export type StepKind =
   'prompt' | 'tool' | 'agent' | 'skill' | 'permission' | 'compaction' | 'error';
 
-export type StepStatus = 'running' | 'ok' | 'failed' | 'info';
+/**
+ * `limited` is a stop the plan imposed, not a failure: painted in the serious
+ * tone with a pause, never in the critical red that means something broke.
+ */
+export type StepStatus = 'running' | 'ok' | 'failed' | 'info' | 'limited';
 
 export type Step = {
   id: number;
@@ -30,6 +41,17 @@ export type Step = {
    * Rendered in the reader's language rather than baked into the title.
    */
   verb?: 'spawned' | 'returned';
+  /** The request that caused this step, so the activity can be read turn by turn. */
+  promptId?: string;
+  /** For an error: its category, which the interface names in the reader's language. */
+  errorKind?: 'api' | 'tool' | 'parse' | 'internal' | 'rate_limit';
+  /** For a plan-limit refusal: which window, and when it reopens. */
+  limit?: { window?: string; resetsAt?: number };
+  /**
+   * A prompt Claude Code wrote to itself — a subagent reporting back, a task
+   * notification. Never a row; it only says what opened the turn.
+   */
+  injected?: boolean;
 };
 
 const durationBetween = (from: string, to: string): number | undefined => {
@@ -58,13 +80,14 @@ const dedupe = (events: MiranteEvent[]): MiranteEvent[] => {
   const passthrough: MiranteEvent[] = [];
 
   for (const event of events) {
-    if (!event.dedupeKey) {
+    const key = dedupeKeyOf(event);
+    if (!key) {
       passthrough.push(event);
       continue;
     }
-    const existing = winners.get(event.dedupeKey);
+    const existing = winners.get(key);
     if (!existing || sourceOutranks(event.source, existing.source)) {
-      winners.set(event.dedupeKey, event);
+      winners.set(key, event);
     }
   }
 
@@ -92,12 +115,23 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
     ts: event.ts,
     agentId: event.agentId,
     ...(event.agentType === undefined ? {} : { agentType: event.agentType }),
+    ...(event.promptId === undefined ? {} : { promptId: event.promptId }),
   });
 
   for (const event of relevant) {
     switch (event.kind) {
       case 'prompt.submitted':
-        if (isInjectedMessage(event.payload.preview)) break;
+        if (isInjectedMessage(event.payload.preview)) {
+          steps.push({
+            ...base(event),
+            kind: 'prompt',
+            title: 'prompt',
+            detail: event.payload.preview,
+            status: 'info',
+            injected: true,
+          });
+          break;
+        }
         steps.push({
           ...base(event),
           kind: 'prompt',
@@ -213,7 +247,15 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
           kind: 'error',
           title: event.payload.kind,
           detail: event.payload.message,
-          status: 'failed',
+          // Mirante failing to read a line is not the agent failing.
+          status:
+            event.payload.kind === 'rate_limit'
+              ? 'limited'
+              : event.payload.kind === 'parse'
+                ? 'info'
+                : 'failed',
+          errorKind: event.payload.kind,
+          ...(event.payload.limit ? { limit: event.payload.limit } : {}),
         });
         break;
 
@@ -224,4 +266,68 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
   }
 
   return steps;
+};
+
+/** Steps that share the request that caused them. */
+export type TurnGroup = {
+  /** The turn's prompt id, or `—` for steps no request could be tied to. */
+  promptId: string;
+  /** What the person typed, when it was captured. */
+  prompt?: string;
+  /**
+   * When no person typed it: what opened the turn. A turn started by a subagent
+   * reporting back is not "text not captured" — nothing was lost.
+   */
+  origin?: 'agent' | 'system';
+  startedAt: string;
+  endedAt: string;
+  /** Newest first. The main agent's own prompt row is the header, not a row. */
+  steps: Step[];
+  failed: number;
+};
+
+/**
+ * Groups the activity under the request that caused it, newest request first.
+ *
+ * Read flat, a session is hundreds of tool calls with no way to tell which
+ * request they answered. Grouped, each request is a header you can open.
+ */
+export const groupStepsByTurn = (steps: Step[]): TurnGroup[] => {
+  const groups = new Map<string, TurnGroup>();
+  for (const step of steps) {
+    const key = step.promptId ?? '—';
+    let group = groups.get(key);
+    if (!group) {
+      group = { promptId: key, startedAt: step.ts, endedAt: step.ts, steps: [], failed: 0 };
+      groups.set(key, group);
+    }
+    if (step.ts < group.startedAt) group.startedAt = step.ts;
+    if (step.ts > group.endedAt) group.endedAt = step.ts;
+
+    if (step.injected) {
+      if (step.agentId === MAIN_AGENT_ID && !group.origin) {
+        const head = (step.detail ?? '').trimStart();
+        group.origin =
+          head.startsWith('<agent-message') ||
+          head.startsWith('<task-notification>') ||
+          head.startsWith('[Subagent hand-back]')
+            ? 'agent'
+            : 'system';
+      }
+      continue;
+    }
+    if (step.kind === 'prompt' && step.agentId === MAIN_AGENT_ID) {
+      const text = requestText(step.detail ?? '');
+      if (text) group.prompt = text;
+      continue;
+    }
+    group.steps.push(step);
+    if (step.status === 'failed') group.failed += 1;
+  }
+
+  const newestFirst = (a: { ts: string; id: number }, b: { ts: string; id: number }) =>
+    b.ts.localeCompare(a.ts) || b.id - a.id;
+  return [...groups.values()]
+    .map((group) => ({ ...group, steps: [...group.steps].sort(newestFirst) }))
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 };

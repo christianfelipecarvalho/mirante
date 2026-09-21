@@ -45,7 +45,27 @@ export type BoardClient = {
   definitions: Map<string, AgentDefinition>;
   connection: Connection;
   decide: (requestId: string, behavior: 'allow' | 'deny') => Promise<boolean>;
+  /**
+   * Asks the daemon to read plan limits now.
+   *
+   * Nothing polls: limits are fetched when the person asks for them, and the
+   * board says how old the reading is in between. See ADR-0006.
+   */
+  refreshPlanUsage: () => Promise<PlanUsageRefresh>;
 };
+
+export type PlanUsageRefresh =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | 'claude-not-found'
+        | 'command-failed'
+        | 'unexpected-output'
+        | 'no-plan-data'
+        | 'not-local'
+        | 'unreachable';
+    };
 
 const RECONNECT_MS = 1500;
 
@@ -161,5 +181,19 @@ export const useBoard = (): BoardClient => {
     return body.accepted;
   };
 
-  return { board, events, definitions, connection, decide };
+  const refreshPlanUsage = async (): Promise<PlanUsageRefresh> => {
+    try {
+      const response = await fetch('/api/plan-usage/refresh', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${tokenRef.current}` },
+      });
+      if (!response.ok) return { ok: false, reason: 'unreachable' };
+      return (await response.json()) as PlanUsageRefresh;
+    } catch {
+      // The daemon stopped while the button was in flight.
+      return { ok: false, reason: 'unreachable' };
+    }
+  };
+
+  return { board, events, definitions, connection, decide, refreshPlanUsage };
 };

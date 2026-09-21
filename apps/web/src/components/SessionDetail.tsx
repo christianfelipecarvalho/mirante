@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { BoardState, MiranteEvent, SessionLane } from '@mirante/shared';
 import { totalTokens } from '@mirante/shared';
 import { formatCost, formatDuration, formatTokens, formatWhen } from '../lib/format';
-import { agentIcon, agentLabel } from '../lib/icons';
+import { agentIcon } from '../lib/icons';
 import { useI18n } from '../lib/i18n';
-import { agentOrdinals, type AgentDefinition } from '../lib/agents';
+import { agentOrdinals, describeAgent, type AgentDefinition } from '../lib/agents';
 import { agentColor } from '../lib/palette';
 import { buildSteps } from '../lib/steps';
 import { buildTurns, type Turn } from '../lib/turns';
@@ -57,7 +57,8 @@ export const SessionDetail = ({
     isRoot ? 'var(--accent)' : agentColor(index);
   const subagents = lane.cards.filter((card) => card.agentId !== 'main');
   const root = lane.cards.find((card) => card.agentId === 'main');
-  const ordinals = agentOrdinals(lane.cards);
+  const identify = (card: (typeof lane.cards)[number]) => describeAgent(card, t);
+  const ordinals = agentOrdinals(lane.cards, (card) => identify(card).name);
 
   const openAgent = (id: string) => {
     setAgentId(id);
@@ -65,7 +66,7 @@ export const SessionDetail = ({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="motion-safe:panel-enter flex min-h-0 flex-1 flex-col gap-3">
       <header
         className="rounded-xl border px-4 py-3"
         style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
@@ -111,7 +112,7 @@ export const SessionDetail = ({
               key={name}
               type="button"
               onClick={() => setTab(name)}
-              className="cursor-pointer rounded px-3 py-1.5 text-[12px] font-medium transition-colors"
+              className="pressable cursor-pointer rounded px-3 py-1.5 text-[12px] font-medium"
               style={{
                 background: tab === name ? 'var(--surface-1)' : 'transparent',
                 color: tab === name ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -130,7 +131,10 @@ export const SessionDetail = ({
         style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
       >
         {tab === 'agents' && (
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+          <div
+            key="agents"
+            className="motion-safe:panel-enter min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
+          >
             {root && (
               <AgentCardView
                 card={root}
@@ -140,6 +144,7 @@ export const SessionDetail = ({
                 )}
                 onDecide={onDecide}
                 onOpen={() => openAgent(root.agentId)}
+                sessionEnded={Boolean(lane.endedAt)}
               />
             )}
             {subagents.length === 0 ? (
@@ -160,6 +165,7 @@ export const SessionDetail = ({
                     )}
                     onDecide={onDecide}
                     onOpen={() => openAgent(card.agentId)}
+                    sessionEnded={Boolean(lane.endedAt)}
                   />
                 ))}
               </div>
@@ -168,7 +174,7 @@ export const SessionDetail = ({
         )}
 
         {tab === 'activity' && (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div key="activity" className="motion-safe:panel-enter flex min-h-0 flex-1 flex-col">
             {/* Agent picker stays put; only the stream under it scrolls. */}
             <div
               className="flex shrink-0 flex-wrap gap-1.5 border-b px-3 py-2"
@@ -184,12 +190,10 @@ export const SessionDetail = ({
               {lane.cards.map((card, index) => (
                 <AgentChip
                   key={card.agentId}
-                  label={
-                    card.agentId === 'main'
-                      ? t('card.session')
-                      : agentLabel(card.agentType, card.agentId)
-                  }
-                  icon={agentIcon(card.agentType, card.agentId)}
+                  label={`${identify(card).name}${
+                    ordinals.get(card.agentId) ? ` ${ordinals.get(card.agentId)}` : ''
+                  }`}
+                  icon={agentIcon(card.agentType, card.agentId, {}, card.task)}
                   color={colorFor(index - 1, card.agentId === 'main')}
                   active={agentId === card.agentId}
                   onClick={() => setAgentId(card.agentId)}
@@ -200,9 +204,22 @@ export const SessionDetail = ({
               <ActivityStream
                 steps={steps}
                 showAgent={agentId === undefined}
+                hideEmpty={agentId !== undefined}
+                liveStatus={
+                  lane.endedAt
+                    ? undefined
+                    : lane.cards.find((card) => card.agentId === 'main')?.status
+                }
                 colorOf={(id) => {
                   const index = lane.cards.findIndex((card) => card.agentId === id);
                   return colorFor(index - 1, id === 'main');
+                }}
+                nameOf={(id) => {
+                  const card = lane.cards.find((candidate) => candidate.agentId === id);
+                  if (!card) return undefined;
+                  const ordinal = ordinals.get(id);
+                  const { name } = identify(card);
+                  return ordinal ? `${name} ${ordinal}` : name;
                 }}
               />
             </div>
@@ -210,7 +227,10 @@ export const SessionDetail = ({
         )}
 
         {tab === 'requests' && (
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+          <div
+            key="requests"
+            className="motion-safe:panel-enter min-h-0 flex-1 space-y-2 overflow-y-auto p-3"
+          >
             {turns.length === 0 ? (
               <p className="px-1 py-6 text-center text-[12px] text-[var(--text-muted)]">
                 {t('detail.requests.empty')}
@@ -241,7 +261,7 @@ const AgentChip = ({
   <button
     type="button"
     onClick={onClick}
-    className="flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] transition-colors"
+    className="pressable flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 text-[11px]"
     style={{
       borderColor: active ? color : 'var(--hairline)',
       background: active ? `color-mix(in oklab, ${color} 14%, transparent)` : 'transparent',

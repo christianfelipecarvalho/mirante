@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { useFreshIds } from '../lib/fresh';
 import type { TimelineEntry, TimelineKind } from '@mirante/shared';
 import { formatClock } from '../lib/format';
 import { useI18n, type Translate } from '../lib/i18n';
+import { CATEGORY_ICON, toolCategory } from '../lib/tools';
 import { Icon, type IconName } from './Icon';
 
 const KIND_META: Record<TimelineKind, { icon: IconName; color: string }> = {
@@ -77,6 +79,8 @@ export const Timeline = ({ entries, sessionFilter }: TimelineProps) => {
     return collapsed.reverse();
   }, [entries, group, sessionFilter]);
 
+  const fresh = useFreshIds(useMemo(() => rows.map(({ entry }) => entry.id), [rows]));
+
   return (
     <aside
       className="flex h-full min-h-0 flex-col rounded-xl border"
@@ -112,13 +116,22 @@ export const Timeline = ({ entries, sessionFilter }: TimelineProps) => {
         )}
         {rows.map(({ entry, repeats }) => {
           const meta = KIND_META[entry.kind];
+          // A row that stands for a tool call shows that tool's mark. A generic
+          // dot for every one of them is what made the timeline look iconless.
+          const icon =
+            (entry.kind === 'tool' || entry.kind === 'tool.failed') && entry.subject
+              ? CATEGORY_ICON[toolCategory(entry.subject)]
+              : meta.icon;
           return (
-            <li key={`${entry.id}-${entry.kind}`} className="flex gap-2 px-1 py-1">
+            <li
+              key={`${entry.id}-${entry.kind}`}
+              className={`flex gap-2 rounded px-1 py-1 ${fresh.has(entry.id) ? 'motion-safe:arrive' : ''}`}
+            >
               <span
                 className="mt-[2px] flex w-3.5 shrink-0 justify-center"
                 style={{ color: meta.color }}
               >
-                <Icon name={meta.icon} size={12} />
+                <Icon name={icon} size={12} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-1.5">

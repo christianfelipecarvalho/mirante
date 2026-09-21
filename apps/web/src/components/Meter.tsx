@@ -1,5 +1,7 @@
 import { formatReset } from '../lib/format';
 import { useI18n } from '../lib/i18n';
+import type { WindowReading } from '../lib/plan';
+import { Icon } from './Icon';
 
 /**
  * Severity rides the fill; the track is a dimmer step of the same ramp, so the
@@ -14,52 +16,64 @@ const fillFor = (percentage: number): string => {
 
 export type MeterProps = {
   label: string;
-  percentage: number | undefined;
-  resetsAt?: number | undefined;
-  /** Shown in place of a reset time when the value is unknown, so absence is explained. */
-  unknownHint?: string;
+  reading: WindowReading;
 };
 
-export const Meter = ({ label, percentage, resetsAt, unknownHint }: MeterProps) => {
+/**
+ * One plan window.
+ *
+ * Three answers, drawn three ways. A reading gets a filled bar. No reading, and
+ * a reading whose window has since reset, both get a hatched track — an empty
+ * solid track looks like 0%, and 0% is a claim this meter cannot make.
+ */
+export const Meter = ({ label, reading }: MeterProps) => {
   const { t } = useI18n();
-  // Absence is not zero. Plan usage is missing for API-key users, before the
-  // first API response, and once a window has reset — saying "unknown" is the
-  // only honest rendering.
-  const known = percentage !== undefined;
-  const value = Math.min(100, Math.max(0, percentage ?? 0));
+  const known = reading.state === 'known';
+  const value = known ? Math.min(100, Math.max(0, reading.percentage)) : 0;
+  const atLimit = known && value >= 100;
+  const near = known && value >= 85;
+
+  const figure = !known ? t('plan.unknown') : atLimit ? t('plan.atLimit') : `${value.toFixed(0)}%`;
+
+  const footnote =
+    reading.state === 'known'
+      ? formatReset(reading.resetsAt, t)
+      : reading.state === 'reset'
+        ? t('plan.windowReset')
+        : '';
 
   return (
-    <div className="min-w-[132px] flex-1">
+    <div className="w-[176px] min-w-0">
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-[11px] text-[var(--text-secondary)]">{label}</span>
-        <span className="tabular text-[11px] font-medium text-[var(--text-primary)]">
-          {known ? `${value.toFixed(0)}%` : t('plan.unknown')}
+        <span
+          className="tabular flex items-center gap-1 text-[12px] font-medium"
+          style={{ color: near ? fillFor(value) : 'var(--text-primary)' }}
+        >
+          {/* Near the ceiling the colour changes, and so does the shape: an icon,
+              then at 100% a word, so the warning survives greyscale. */}
+          {near && <Icon name="alert" size={11} />}
+          {figure}
         </span>
       </div>
       <div
-        className="h-1.5 w-full overflow-hidden rounded-full"
-        style={{ background: 'var(--accent-track)' }}
+        className={`h-1.5 w-full overflow-hidden rounded-full ${known ? '' : 'hatch'}`}
+        style={known ? { background: 'var(--accent-track)' } : undefined}
         role="meter"
         aria-valuenow={known ? value : undefined}
         aria-valuemin={0}
         aria-valuemax={100}
+        aria-valuetext={known ? `${value.toFixed(0)}%` : t('plan.unknown')}
         aria-label={label}
       >
         {known && (
           <div
-            className="h-full rounded-full transition-[width] duration-500"
+            className="h-full rounded-full transition-[width] duration-[250ms]"
             style={{ width: `${Math.max(value, 1.5)}%`, background: fillFor(value) }}
           />
         )}
       </div>
-      {known && resetsAt !== undefined && (
-        <div className="mt-1 text-[10px] text-[var(--text-muted)]">{formatReset(resetsAt, t)}</div>
-      )}
-      {!known && unknownHint && (
-        <div className="mt-1 text-[10px] text-[var(--text-muted)]" title={unknownHint}>
-          {unknownHint}
-        </div>
-      )}
+      <div className="mt-1 h-[14px] truncate text-[10px] text-[var(--text-muted)]">{footnote}</div>
     </div>
   );
 };

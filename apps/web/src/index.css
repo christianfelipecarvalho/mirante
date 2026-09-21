@@ -124,3 +124,243 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * Motion.
+ *
+ * One idea, not a set of effects: this board is watched while work happens, so
+ * the thing worth animating is arrival. A row that just landed says so and then
+ * settles. Everything else either answers a click or does not move — entrance
+ * animations on every panel are the generic default and make a live board feel
+ * busy rather than alive.
+ */
+@keyframes mirante-arrive {
+  from {
+    background-color: color-mix(in oklab, var(--accent) 22%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.arrive {
+  animation: mirante-arrive 1.4s ease-out;
+}
+
+@keyframes mirante-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Used when a panel replaces another, so the swap reads as a move, not a cut. */
+.panel-enter {
+  animation: mirante-rise 180ms ease-out;
+}
+
+@keyframes mirante-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/*
+ * The seam: one pass of light along the header's bottom edge, each time new
+ * events arrive. It used to loop for as long as the board was connected, which
+ * on a second monitor is motion in peripheral vision that says nothing — being
+ * live is the normal state. Now it answers something that actually happened.
+ */
+.seam-once::after {
+  content: '';
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  block-size: 1px;
+  inline-size: 28%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  transform: translateX(-100%);
+  animation: mirante-sweep 900ms ease-out 1;
+}
+
+/* A meter with no reading. Hatched so an empty track cannot pass for 0%. */
+.hatch {
+  background: repeating-linear-gradient(135deg, var(--baseline) 0 2px, transparent 2px 5px);
+}
+
+/* Press feedback through colour, never transform: a card that moves under the
+   cursor shifts everything around it. */
+.pressable {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.pressable:active {
+  background-color: color-mix(in oklab, var(--accent) 12%, var(--surface-1));
+}
+
+@keyframes mirante-shimmer {
+  from {
+    background-position: -220% 0;
+  }
+  to {
+    background-position: 220% 0;
+  }
+}
+
+.skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--surface-1) 0%,
+    color-mix(in oklab, var(--text-muted) 14%, var(--surface-1)) 50%,
+    var(--surface-1) 100%
+  );
+  background-size: 220% 100%;
+  animation: mirante-shimmer 1.6s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/*
+ * A sideways rail for the project chips.
+ *
+ * The scrollbar is drawn thin and in the hairline colour so a row that happens
+ * to overflow does not announce itself as a second piece of furniture.
+ */
+.rail {
+  scrollbar-width: thin;
+  scrollbar-color: var(--baseline) transparent;
+  scroll-snap-type: x proximity;
+}
+.rail > * {
+  scroll-snap-align: start;
+}
+/* Only while the row overflows: the cut-off chip fades, so it reads as "more". */
+.rail[data-overflow='true'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.rail::-webkit-scrollbar {
+  height: 6px;
+}
+.rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+.rail::-webkit-scrollbar-thumb {
+  background: var(--baseline);
+  border-radius: 999px;
+}
+
+/*
+ * The one thing on the board allowed to move on its own.
+ *
+ * A project blocked on a decision is the only state where nothing progresses
+ * until a person acts, so it is the only state worth an involuntary glance.
+ */
+@keyframes mirante-calling {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-warning) 45%, transparent);
+  }
+  60% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--status-warning) 0%, transparent);
+  }
+}
+.calling {
+  animation: mirante-calling 2.2s ease-out infinite;
+}
+
+/*
+ * The header: four named areas, placed on purpose.
+ *
+ *   wide:   brand | limits | spend | prefs
+ *   narrow: brand | spend  | prefs
+ *           limits (full width)
+ *
+ * A container query rather than a media query, so the header answers to its
+ * own width and not the window's.
+ */
+.topbar {
+  container-type: inline-size;
+}
+.topbar-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: 'brand limits spend prefs';
+  align-items: center;
+  column-gap: 20px;
+}
+.topbar-grid > .topbar-cell {
+  border-inline-start: 1px solid var(--hairline);
+  padding-inline-start: 20px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+.topbar-spend {
+  justify-content: flex-end;
+}
+@container (max-width: 1080px) {
+  .topbar-grid {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'brand spend prefs'
+      'limits limits limits';
+    row-gap: 12px;
+  }
+  .topbar-grid > .topbar-limits {
+    border-inline-start: 0;
+    padding-inline-start: 0;
+    border-block-start: 1px solid var(--hairline);
+    padding-block-start: 12px;
+  }
+}
+
+/*
+ * Working, right now. A thin bar sweeping along the top of a card whose agent
+ * has actually been heard from recently — never on a card that merely claims
+ * to be running (see lib/liveness). The bar takes the agent's own colour, so a
+ * lane of busy agents reads as several channels active, not as one alarm.
+ */
+.card-loading {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 0;
+  /* The same weight as the agent rail down the left edge, so the two read as
+     one frame around a card that is working. */
+  block-size: 3px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--bar) 16%, transparent);
+}
+.card-loading::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inline-size: 35%;
+  background: linear-gradient(90deg, transparent, var(--bar), transparent);
+  animation: mirante-loading 1.4s ease-in-out infinite;
+}
+@keyframes mirante-loading {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+/* Without motion, still say "active": a solid bar instead of a sweep. */
+@media (prefers-reduced-motion: reduce) {
+  .card-loading::after {
+    animation: none;
+    inline-size: 100%;
+    background: var(--bar);
+    opacity: 0.6;
+  }
+}

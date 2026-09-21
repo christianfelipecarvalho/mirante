@@ -1,7 +1,7 @@
 import type { BoardState, SessionLane as Lane } from '@mirante/shared';
 import { formatCost, formatTokens } from '../lib/format';
 import { useI18n } from '../lib/i18n';
-import { agentOrdinals, type AgentDefinition } from '../lib/agents';
+import { agentOrdinals, describeAgent, type AgentDefinition } from '../lib/agents';
 import { agentColor } from '../lib/palette';
 import { Icon } from './Icon';
 import { AgentCardView } from './AgentCard';
@@ -12,6 +12,13 @@ export type SessionLaneProps = {
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
   definitions: Map<string, AgentDefinition>;
   onOpen: () => void;
+  /**
+   * Drawn inside a project section, which already names the project. The lane
+   * then leads with what tells its sessions apart — the branch — instead of
+   * repeating the heading above it at a larger size.
+   */
+  inProject?: boolean;
+  now?: number | undefined;
 };
 
 export const SessionLaneView = ({
@@ -20,6 +27,8 @@ export const SessionLaneView = ({
   onDecide,
   definitions,
   onOpen,
+  inProject = false,
+  now,
 }: SessionLaneProps) => {
   const { t } = useI18n();
   const entrypoint = t(`entry.${lane.entrypoint}` as 'entry.cli');
@@ -28,7 +37,8 @@ export const SessionLaneView = ({
 
   const root = lane.cards.find((card) => card.agentId === 'main');
   const subagents = lane.cards.filter((card) => card.agentId !== 'main');
-  const ordinals = agentOrdinals(lane.cards);
+  const identify = (card: (typeof lane.cards)[number]) => describeAgent(card, t);
+  const ordinals = agentOrdinals(lane.cards, (card) => identify(card).name);
 
   return (
     <section
@@ -41,11 +51,21 @@ export const SessionLaneView = ({
           onClick={onOpen}
           className="flex cursor-pointer items-center gap-1.5 text-[13px] font-semibold text-[var(--text-primary)] transition-colors hover:text-[var(--accent)]"
         >
-          {lane.projectName}
+          {inProject && lane.gitBranch ? (
+            <>
+              <Icon name="branch" size={12} />
+              {lane.gitBranch}
+            </>
+          ) : (
+            lane.projectName
+          )}
           <Icon name="open" size={11} />
         </button>
-        {lane.gitBranch && (
-          <span className="text-[11px] text-[var(--text-secondary)]">⑂ {lane.gitBranch}</span>
+        {!inProject && lane.gitBranch && (
+          <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
+            <Icon name="branch" size={11} />
+            {lane.gitBranch}
+          </span>
         )}
         {entrypoint && (
           <span
@@ -76,6 +96,8 @@ export const SessionLaneView = ({
           approval={approvalFor(root.agentId)}
           onDecide={onDecide}
           onOpen={onOpen}
+          now={now}
+          sessionEnded={Boolean(lane.endedAt)}
         />
       )}
 
@@ -102,6 +124,8 @@ export const SessionLaneView = ({
                 approval={approvalFor(card.agentId)}
                 onDecide={onDecide}
                 onOpen={onOpen}
+                now={now}
+                sessionEnded={Boolean(lane.endedAt)}
               />
             ))}
           </div>

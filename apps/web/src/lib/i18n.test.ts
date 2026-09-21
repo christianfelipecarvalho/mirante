@@ -68,9 +68,15 @@ describe('the two dictionaries stay in step', () => {
             'timeline.skill',
             'timeline.repeated',
             'stat.tokens',
+            'spend.tokens',
             'card.tokens',
             'lane.context',
             'theme.auto',
+            // Role names spelled the same in both languages.
+            'agentRole.dev',
+            'agentRole.qa',
+            'agentRole.docs',
+            'agentRole.designer',
           ].includes(key),
       );
     expect(identical.map(([key]) => key)).toEqual([]);

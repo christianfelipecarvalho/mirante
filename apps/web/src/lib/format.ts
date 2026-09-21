@@ -73,3 +73,22 @@ export const formatReset = (
 
 /** How long a card has been stuck, for the "waiting since" line. */
 export const formatWaitingFor = (sinceIso: string): string => formatDuration(sinceIso);
+
+/** "22:00" today, "24/09 05:00" on another day: a reset time, as people say it. */
+export const formatResetClock = (epochSeconds: number): string => {
+  const at = new Date(epochSeconds * 1000);
+  const time = at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return at.toDateString() === new Date().toDateString()
+    ? time
+    : `${at.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${time}`;
+};
+
+/** Minute granularity: "<1m", "12m", "1h 5m", "2d". Seconds would tick, and ticking is motion. */
+export const formatSpan = (ms: number): string => {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 1) return '<1m';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return minutes % 60 === 0 ? `${hours}h` : `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d`;
+};

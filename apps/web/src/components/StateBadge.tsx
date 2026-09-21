@@ -22,21 +22,48 @@ export const STATE_META: Record<CardState, Meta> = {
   error: { icon: 'cross', color: 'var(--status-critical)' },
 };
 
-export const StateBadge = ({ status }: { status: CardStatus }) => {
+/**
+ * States the interface derives rather than receives: a card stopped by a plan
+ * limit, and a card that claims to be working but has gone silent.
+ */
+export type BadgeOverride = 'interrupted' | 'silent';
+
+const OVERRIDE_META: Record<BadgeOverride, Meta> = {
+  // Orange and a pause, not red and a cross: nothing broke. The plan said stop.
+  interrupted: { icon: 'pause', color: 'var(--status-serious)' },
+  // Muted and hollow: this is not a state, it is the absence of one.
+  silent: { icon: 'circle', color: 'var(--text-muted)' },
+};
+
+export const StateBadge = ({
+  status,
+  override,
+  title,
+}: {
+  status: CardStatus;
+  override?: BadgeOverride | undefined;
+  title?: string | undefined;
+}) => {
   const { t } = useI18n();
-  const meta = STATE_META[status.state];
-  const live = status.state === 'tool_running' || status.state === 'thinking';
+  const meta = override ? OVERRIDE_META[override] : STATE_META[status.state];
+  const label = override
+    ? t(`state.${override}` as 'state.idle')
+    : t(`state.${status.state}` as 'state.idle');
 
   return (
     <span
+      title={title}
       className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium"
       style={{
         color: meta.color,
         background: 'color-mix(in oklab, currentColor 12%, transparent)',
       }}
     >
-      <Icon name={meta.icon} size={12} className={live ? 'motion-safe:animate-pulse' : undefined} />
-      {t(`state.${status.state}` as 'state.idle')}
+      {/* Still, on purpose. With eight agents working, eight pulsing badges are
+          noise in peripheral vision, and they drown out the one thing that is
+          allowed to move: a project waiting on you. */}
+      <Icon name={meta.icon} size={12} />
+      {label}
     </span>
   );
 };
