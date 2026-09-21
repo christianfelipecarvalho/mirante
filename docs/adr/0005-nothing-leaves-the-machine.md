@@ -23,3 +23,8 @@ This is enforced, not merely stated:
 - Redaction runs at **ingest**, before data reaches SQLite, so a purge cannot be defeated by data already written.
 - `mirante purge` must fully remove stored data.
 - Any future feature that needs the network — a version check, a plugin registry — requires a new ADR superseding this one, not a quiet exception.
+
+## Amendments
+
+- [ADR-0006](0006-plan-limits-on-demand.md) — reading plan limits through Claude Code's own local `/usage` command, on demand only. Mirante still makes no outbound call and still reads no credential; the ADR records why that is nonetheless a decision and not a detail.
+- [ADR-0007](0007-cached-plan-figure-refreshes-itself.md) — while an agent is working, Mirante runs Claude Code's `/usage` once a minute. No tokens; Claude Code, not Mirante, contacts Anthropic about the account. Stops itself if `/usage` ever costs tokens.

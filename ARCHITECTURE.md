@@ -9,7 +9,8 @@ Mirante is a local observer. It watches Claude Code sessions that are already ru
 │ hooks       (push)   │──▶│ ingest ─▶ normalize ─▶ event log    │──▶│ board      │
 │ transcript  (tail)   │──▶│                         (SQLite)    │   │ timeline   │
 │ status line (push)   │──▶│            └─▶ projector ─▶ state   │──▶│ top bar    │
-│ otel        (M2)     │──▶│                                      │   │ approvals  │
+│ plan cache  (poll)   │──▶│                                      │   │ approvals  │
+│ otel        (M2)     │──▶│                                      │   │            │
 └──────────────────────┘   └──────────────────────────────────────┘   └────────────┘
 ```
 
@@ -50,11 +51,15 @@ The hook payload provides `transcript_path`; Mirante never guesses it. The reade
 
 This directory layout is an internal detail of Claude Code, not a documented interface. It is isolated behind a versioned adapter; see [ADR-0004](docs/adr/0004-transcript-as-spine.md).
 
-### Status line — the only source of plan usage
+### Status line — plan usage, pushed from the terminal
 
-Plan limits (`rate_limits.five_hour`, `rate_limits.seven_day`, and sometimes `spend_limit`) reach no other surface. The installer wraps any status line the user already had: the wrapper tees stdin, prints the original command's output unchanged, and fires a non-blocking POST to the daemon.
+Plan limits (`rate_limits.five_hour`, `rate_limits.seven_day`, and sometimes `spend_limit`) are pushed here, but only while a terminal session is open — the status line never runs in the VS Code extension, `claude -p` or the Agent SDK. The installer wraps any status line the user already had: the wrapper tees stdin, prints the original command's output unchanged, and fires a non-blocking POST to the daemon.
 
 Two constraints shape that wrapper. Claude Code debounces status line updates at 300 ms and **cancels the in-flight script** when a new update arrives, so the wrapper must never block. And `rate_limits` is absent for API-key users, absent before the first API response of a session, and each window disappears once its `resets_at` passes.
+
+### Cached plan figure — plan usage from anywhere
+
+Claude Code keeps its last plan reading in `~/.claude.json` (`cachedUsageUtilization`), and writes it when `/usage` fetches it — not as it works. So while any agent is working, the daemon runs `/usage` once a minute, then reads the fresh figure from that file: only when the file changed, only the two windows, refused if written for another account or more than an hour ago, and appended only when the figure is new. With nothing working, nothing runs. This is what gives an editor-only user limits at all. The "Read now" button runs `/usage` at once. The projector keeps the newest reading by time, whichever surface it came from. See [ADR-0006](docs/adr/0006-plan-limits-on-demand.md) and [ADR-0007](docs/adr/0007-cached-plan-figure-refreshes-itself.md).
 
 ### OpenTelemetry — optional, M2
 
@@ -78,7 +83,7 @@ Every waiting state must display, in short text, **what** is being waited on. Th
 - `waiting_subagent` — the parent has a _synchronous_ subagent call open with no result. Subagents launched asynchronously (`status: "async_launched"`) do **not** block the parent; the parent keeps its real state and shows a running-agent count badge instead.
 - `waiting_approval` — a permission request is pending in the daemon for that card.
 - `waiting_input` — a `Notification` arrived and has not been resolved.
-- `rate_limited` — in M1, derived only from status line plan percentage. Detection from transcript errors is unvalidated; see [docs/EVENT_MAP.md](docs/EVENT_MAP.md).
+- `rate_limited` — an active card while the plan reading is at 100% and its window has not reset. A card the plan actually stopped is reported from the transcript's refusal entry, with the window and the time it reopens, and shown as interrupted rather than failed; see [docs/EVENT_MAP.md](docs/EVENT_MAP.md) §8.
 
 ## On-screen approval
 

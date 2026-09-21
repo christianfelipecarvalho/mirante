@@ -29,17 +29,20 @@ You keep starting sessions exactly as you do today — `claude` in a terminal, t
    VS Code  ─┼── hooks (HTTP) ─────────▶ ingest ─┐
    claude -p ┘                                   ├─▶ normalized events ─▶ SQLite ─▶ WebSocket ─▶ UI
              └── transcript JSONL ─────▶ tail ───┤
-             └── status line ──────────▶ push ───┘
+             └── status line ──────────▶ push ───┤
+   ~/.claude.json (cached plan figure) ─▶ read ───┘
 ```
 
-Four sources, one normalized event contract:
+One normalized event contract, fed by:
 
-| Source               | Role                                                                             |
-| -------------------- | -------------------------------------------------------------------------------- |
-| **Hooks**            | Primary real-time signal. Push, low latency.                                     |
-| **Transcript JSONL** | Source of truth for content, token usage, and the agent tree. Survives restarts. |
-| **Status line**      | The _only_ source of plan usage (5-hour and weekly limits).                      |
-| **OpenTelemetry**    | Optional second source for tokens and cost. Planned for M2.                      |
+| Source                 | Role                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Hooks**              | Primary real-time signal. Push, low latency.                                                                                                                 |
+| **Transcript JSONL**   | Source of truth for content, token usage, the agent tree, when a subagent ends and why, and when a request was refused at a plan limit.                      |
+| **Status line**        | Plan usage pushed while a terminal session is open.                                                                                                          |
+| **`/usage`**           | Plan usage anywhere, including the VS Code extension. Run once a minute while an agent is working, and by "Read now": a local command that spends no tokens. |
+| **Cached plan figure** | The 5-hour and weekly figures `/usage` leaves in `~/.claude.json`. Read for free; only those two numbers are taken.                                          |
+| **OpenTelemetry**      | Optional second source for tokens and cost. Planned for M2.                                                                                                  |
 
 Every source is normalized into the same append-only event stream before it reaches the UI. Nothing raw from a hook or a transcript is ever sent to the front end.
 
@@ -101,6 +104,8 @@ These are hard rules, not defaults:
 - **Nothing leaves your machine.** No telemetry, no account, no remote server. There is a test in CI asserting no outbound network call is made.
 - **The daemon binds to `127.0.0.1` only**, requires a token generated at install time, and validates the `Origin` header.
 - **Prompts and tool inputs can contain secrets.** They are stored locally, redaction is configurable, and `mirante purge` wipes stored data.
+- **Two numbers, nothing else, from Claude Code's state file.** To show plan limits outside the terminal, Mirante reads the 5-hour and weekly figures Claude Code already caches in `~/.claude.json`. A strict schema extracts those two windows and nothing more; the account's identity in the same file is never stored, logged, or sent, and a test asserts it. Credential files are never opened. See [ADR-0007](docs/adr/0007-cached-plan-figure-refreshes-itself.md).
+- **`/usage` runs only while an agent is working.** Once a minute then, and when you press "Read now"; never while idle. It spends no tokens — checked on every run, and the automatic reading stops itself if that ever changes — but Claude Code does contact Anthropic about your account when it runs. Each run removes the one transcript it leaves behind. `MIRANTE_PLAN_POLL_MS=0` turns it off. See [ADR-0007](docs/adr/0007-cached-plan-figure-refreshes-itself.md).
 
 ## Roadmap
 
@@ -131,4 +136,4 @@ Contributions are welcome from the first commit. Good first issues are labeled [
 
 ---
 
-**Independent project.** Mirante is not affiliated with, endorsed by, or sponsored by Anthropic. It observes data that Claude Code already exposes on your own machine through its documented hook, transcript, and status line interfaces. "Claude" and "Claude Code" are trademarks of their respective owner and are used here only to describe what this tool interoperates with.
+**Independent project.** Mirante is not affiliated with, endorsed by, or sponsored by Anthropic. It observes data that Claude Code already exposes on your own machine: its documented hook and status line interfaces, the transcripts it writes, and the plan-usage figure it caches in its own state file. The last two are not documented interfaces; Mirante reads them behind versioned adapters and says so in [docs/EVENT_MAP.md](docs/EVENT_MAP.md). "Claude" and "Claude Code" are trademarks of their respective owner and are used here only to describe what this tool interoperates with.

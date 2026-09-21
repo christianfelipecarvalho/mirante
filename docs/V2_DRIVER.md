@@ -46,7 +46,9 @@ Commands are rejected for sessions that the driver does not own. **A driven comm
 
 ## Known asymmetry: plan usage
 
-`rate_limits` reaches only the status line, and the status line runs only in the interactive interface. **A driven session has no plan usage data.**
+`rate_limits` reaches only the status line, and the status line runs only in the interactive interface, so a driven session never pushes plan usage.
+
+**Probably no longer a gap — to verify before M4.** Plan usage is per account, and since [ADR-0007](adr/0007-cached-plan-figure-refreshes-itself.md) Mirante reads the figure Claude Code caches in `~/.claude.json`, whatever surface produced it. If a session driven through the Agent SDK refreshes that cache as the CLI does — the SDK runs the same executable, but this is unobserved — driven sessions get plan usage for free. Until that is verified, the rule below stands.
 
 This is not a bug to be fixed; it is a property of the surfaces. The UI must render plan usage as "unavailable for this session" rather than zero, and the reason must be discoverable in the interface, not only in the docs. This asymmetry is the strongest single argument for observer-first and is recorded in [ADR-0001](adr/0001-observer-before-driver.md).
 
