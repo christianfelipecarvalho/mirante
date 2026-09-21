@@ -27,6 +27,8 @@ export type WatcherOptions = {
   pollIntervalMs?: number;
   /** How far back to consider a session live. Browsable history is M2. */
   maxAgeMs?: number;
+  /** Project directories to skip, by slug. Mirante's own probe lives in one. */
+  ignoreSlugs?: ReadonlySet<string>;
   onWarning?: (message: string) => void;
 };
 
@@ -56,6 +58,7 @@ export class TranscriptWatcher {
     this.options = {
       pollIntervalMs: DEFAULT_POLL_MS,
       maxAgeMs: DEFAULT_MAX_AGE_MS,
+      ignoreSlugs: new Set<string>(),
       ...options,
     };
   }
@@ -89,7 +92,11 @@ export class TranscriptWatcher {
     this.scanning = true;
     try {
       let appended = 0;
-      for (const session of locateSessions(this.options.projectsDir, this.options.maxAgeMs)) {
+      for (const session of locateSessions(
+        this.options.projectsDir,
+        this.options.maxAgeMs,
+        this.options.ignoreSlugs,
+      )) {
         appended += this.scanSession(session);
       }
       return appended;

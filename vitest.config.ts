@@ -12,6 +12,7 @@ export default defineConfig({
   },
   test: {
     globals: false,
+    setupFiles: ['./tests/isolate-claude-state.ts'],
     include: ['{packages,apps}/*/src/**/*.test.ts', 'tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',

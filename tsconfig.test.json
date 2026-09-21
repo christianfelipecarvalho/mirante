@@ -10,7 +10,9 @@
     "paths": {
       "@mirante/shared": ["./packages/shared/src/index.ts"],
       "@mirante/daemon": ["./apps/daemon/src/index.ts"]
-    }
+    },
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
   "include": [
     "tests/**/*.ts",

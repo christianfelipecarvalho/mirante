@@ -83,12 +83,26 @@ export const locateSession = (
  * `maxAgeMs` keeps the board about what is happening rather than about
  * everything that ever happened — browsable history is M2.
  */
-export const locateSessions = (projectsDir: string, maxAgeMs?: number): LocatedSession[] => {
+/**
+ * Claude Code names a project directory after its path, with every `/` and `.`
+ * flattened to a dash.
+ */
+export const projectSlug = (path: string): string => path.replace(/[/.]/g, '-');
+
+export const locateSessions = (
+  projectsDir: string,
+  maxAgeMs?: number,
+  ignoreSlugs: ReadonlySet<string> = new Set(),
+): LocatedSession[] => {
   if (!existsSync(projectsDir)) return [];
   const cutoff = maxAgeMs === undefined ? 0 : Date.now() - maxAgeMs;
   const sessions: LocatedSession[] = [];
 
   for (const slug of safeReaddir(projectsDir)) {
+    // Mirante's own probe directory. Suppressing its hooks is not enough: Claude
+    // Code writes a transcript whatever the settings say, and the watcher would
+    // read it back as a session the user never ran.
+    if (ignoreSlugs.has(slug)) continue;
     const dir = join(projectsDir, slug);
     if (!safeStat(dir)?.isDirectory()) continue;
 

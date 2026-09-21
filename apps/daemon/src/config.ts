@@ -16,6 +16,18 @@ export type MiranteConfig = {
   /** Where Claude Code writes session transcripts. */
   claudeProjectsDir: string;
   /**
+   * Claude Code's own state file. Read for one key — the plan-usage figure it
+   * already fetched — and for nothing else. Never a credential file. See
+   * ADR-0006.
+   */
+  claudeStatePath: string;
+  /**
+   * How often, while an agent is working, to run `/usage` and read the figure it
+   * leaves. Claude Code fetches it at most once a minute, so faster finds nothing
+   * new. Nothing runs while idle. 0 disables. See ADR-0007.
+   */
+  planUsagePollMs: number;
+  /**
    * How long the daemon holds a permission request before answering `ask` and
    * letting the terminal prompt. Must stay well under the hook's own timeout: a
    * hook that times out on PreToolUse does not block the call, so waiting longer
@@ -35,6 +47,23 @@ export type MiranteConfig = {
 };
 
 const DEFAULT_PORT = 7788;
+
+/**
+ * The plan-usage poll interval. Parsed on its own because 0 is meaningful here —
+ * it turns the poller off — and `envNumber` treats 0 as unset. Anything else is
+ * held to one minute: Claude Code rewrites the figure at most that often, so
+ * polling faster only re-reads the same bytes.
+ */
+export const MIN_PLAN_POLL_MS = 60_000;
+const planPollMs = (override: number | undefined): number => {
+  const raw =
+    override ??
+    (process.env.MIRANTE_PLAN_POLL_MS === undefined
+      ? undefined
+      : Number(process.env.MIRANTE_PLAN_POLL_MS));
+  if (raw === undefined || !Number.isFinite(raw) || raw < 0) return MIN_PLAN_POLL_MS;
+  return raw === 0 ? 0 : Math.max(MIN_PLAN_POLL_MS, raw);
+};
 
 const envNumber = (name: string, fallback: number): number => {
   const raw = process.env[name];
@@ -57,6 +86,11 @@ export const loadConfig = (overrides: Partial<MiranteConfig> = {}): MiranteConfi
       overrides.claudeProjectsDir ??
       process.env.CLAUDE_PROJECTS_DIR ??
       join(homedir(), '.claude', 'projects'),
+    // Where Claude Code itself looks: CLAUDE_CONFIG_DIR when set, home otherwise.
+    // Hardcoding home would leave those users with "unknown" forever and no hint.
+    claudeStatePath:
+      overrides.claudeStatePath ?? join(process.env.CLAUDE_CONFIG_DIR || homedir(), '.claude.json'),
+    planUsagePollMs: planPollMs(overrides.planUsagePollMs),
     approvalWindowMs: overrides.approvalWindowMs ?? envNumber('MIRANTE_APPROVAL_WINDOW_MS', 20_000),
     ...((overrides.devOrigin ?? process.env.MIRANTE_DEV_ORIGIN)
       ? { devOrigin: overrides.devOrigin ?? process.env.MIRANTE_DEV_ORIGIN }

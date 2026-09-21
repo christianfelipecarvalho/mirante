@@ -177,6 +177,13 @@ export class EventLog {
     return row.id ?? 0;
   }
 
+  /** Whether a fact with this key is already in the log. Indexed. */
+  hasDedupeKey(key: string): boolean {
+    return (
+      this.db.prepare('SELECT 1 FROM events WHERE dedupe_key = ? LIMIT 1').get(key) !== undefined
+    );
+  }
+
   count(): number {
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number };
     return row.n;

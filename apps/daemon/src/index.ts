@@ -13,6 +13,8 @@ export { hookToEvents, hookPayloadSchema } from './ingest/hooks.js';
 export { statusLineToEvents, statusLinePayloadSchema } from './ingest/statusline.js';
 export { parseSessionTranscript, normalizeEntrypoint } from './ingest/transcript/parse.js';
 export { locateSessions, locateSession } from './ingest/transcript/locate.js';
+export { readCachedUsageFile } from './ingest/plan-usage-cache.js';
+export type { CacheFailure } from './ingest/plan-usage-cache.js';
 export { TranscriptWatcher } from './ingest/transcript/watcher.js';
 export { createDaemon } from './server/index.js';
 export {
@@ -43,6 +45,7 @@ export const start = async (
     config,
     token,
     watch: true,
+    pollPlanUsage: true,
     logger: options.logger ?? false,
     ...(options.webRoot ? { webRoot: options.webRoot } : {}),
   };

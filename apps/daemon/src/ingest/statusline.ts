@@ -4,8 +4,10 @@ import { MAIN_AGENT_ID, emptyTokenUsage, type DraftEvent, type PlanUsage } from 
 /**
  * The JSON Claude Code pipes to a status line command.
  *
- * This is the only surface that reports plan usage, which is why Mirante wraps
- * the user's status line rather than asking them to give one up.
+ * This is the only surface that *pushes* plan usage, which is why Mirante wraps
+ * the user's status line rather than asking them to give one up. It arrives for
+ * free, but only while a terminal session is open; `/usage` is the surface that
+ * can be pulled from anywhere. See ingest/usage-command.ts and ADR-0006.
  */
 export const statusLinePayloadSchema = z
   .object({
