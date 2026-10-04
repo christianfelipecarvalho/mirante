@@ -11,6 +11,7 @@ import { StateBadge } from './StateBadge';
 
 const NON_TOOL_ICON: Record<Exclude<StepKind, 'tool'>, IconName> = {
   prompt: 'prompt',
+  said: 'speech',
   agent: 'handoff',
   skill: 'skill',
   permission: 'alert',
@@ -310,6 +311,9 @@ const Row = ({
   // An agent row whose title is the agent's own type would just repeat the agent
   // column. Say what happened instead, and let the name be the argument.
   const isPrompt = step.kind === 'prompt';
+  // The agent talking. No label: "said:" in front of a sentence is furniture,
+  // and the sentence is the only thing on the row worth reading.
+  const isSaid = step.kind === 'said';
   // What a person typed is quoted, never labelled "prompt:" — so a one-character
   // prompt reads as a character someone typed, not as a glitch. A subagent's
   // first entry is the brief its parent wrote, and says so.
@@ -321,7 +325,9 @@ const Row = ({
         ? step.agentId === 'main'
           ? ''
           : t('activity.brief')
-        : step.title;
+        : isSaid
+          ? ''
+          : step.title;
   const primary = step.verb
     ? step.title
     : error
@@ -335,7 +341,7 @@ const Row = ({
 
   return (
     <li
-      className={`grid grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] items-baseline gap-x-2.5 rounded px-2 py-[5px] text-[12px] transition-colors hover:bg-[var(--surface-1)] ${fresh ? 'motion-safe:arrive' : ''}`}
+      className={`grid grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] gap-x-2.5 rounded px-2 py-[5px] text-[12px] transition-colors hover:bg-[var(--surface-1)] ${isSaid ? 'items-start' : 'items-baseline'} ${fresh ? 'motion-safe:arrive' : ''}`}
       style={{ opacity: recessive ? 0.55 : 1 }}
     >
       <span className="tabular text-[10px] text-[var(--text-muted)]">{formatClock(step.ts)}</span>
@@ -380,7 +386,13 @@ const Row = ({
         )}
         {primary && (
           <span
-            className={`min-w-0 truncate text-[var(--text-secondary)] ${!step.verb && described?.mono ? 'font-mono text-[11px]' : ''}`}
+            className={
+              isSaid
+                ? // Two lines, wrapped: a sentence cut at one line is a sentence
+                  // you have to open the card to finish.
+                  'line-clamp-2 min-w-0 text-[var(--text-primary)]'
+                : `min-w-0 truncate text-[var(--text-secondary)] ${!step.verb && described?.mono ? 'font-mono text-[11px]' : ''}`
+            }
             title={step.detail}
             // Claude Code's own message, left in its language and marked as such
             // so a Portuguese screen reader pronounces it correctly.

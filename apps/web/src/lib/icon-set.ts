@@ -6,6 +6,7 @@
  */
 export type IconName =
   | 'terminal'
+  | 'speech'
   | 'file'
   | 'pencil'
   | 'search'
@@ -47,7 +48,9 @@ export type IconName =
   | 'archive'
   | 'sliders'
   | 'branch'
-  | 'disclose';
+  | 'disclose'
+  | 'harness'
+  | 'agents';
 
 export const ICON_PATHS: Record<IconName, string> = {
   terminal: 'M5 7l4 4-4 4M12 16h7',
@@ -69,6 +72,8 @@ export const ICON_PATHS: Record<IconName, string> = {
   thinking: 'M12 4a8 8 0 1 0 0 16zM12 4a8 8 0 0 1 0 16',
   down: 'M12 4v13M7 12l5 5 5-5',
   prompt: 'M9 6l6 6-6 6',
+  /* A bubble with a tail: what was said, as opposed to what was done. */
+  speech: 'M4.5 6.5h15v9h-8.5l-4 4v-4h-2.5z',
   compact: 'M4 9h16M4 15h16M9 5l3-2 3 2M9 19l3 2 3-2',
   unknown: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z',
   // The lookout tower, matching the favicon.
@@ -115,6 +120,12 @@ export const ICON_PATHS: Record<IconName, string> = {
   branch:
     'M7 3.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 16.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM17 3.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 7.5v9M17 7.5v1.5a4 4 0 0 1-4 4h-2a4 4 0 0 0-4 3.5',
   package: 'M12 3l8 4.3v9.4L12 21l-8-4.3V7.3zM4 7.3l8 4.3 8-4.3M12 11.6V21',
+  // The coding agent a session runs in: a prompt inside a frame. Distinct from
+  // `terminal`, the bare prompt a shell call gets, and from `window`, a browser.
+  // One mark for every harness; the word beside it says which.
+  harness: 'M3.5 5.5h17v13h-17zM7.5 10l2.5 2-2.5 2M12.5 14h4',
+  // Agents, counted: the `agent` hexagon with a second one behind it.
+  agents: 'M9.5 9l4.8 2.75v5.5L9.5 20l-4.8-2.75v-5.5zM9.7 7.6V6.75L14.5 4l4.8 2.75v5.5l-3.2 1.85',
 };
 
 /** Shapes that read as areas rather than outlines. */

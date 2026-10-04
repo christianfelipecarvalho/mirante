@@ -1,4 +1,5 @@
-import type { PlanWindow } from '@mirante/shared';
+import { PLAN_READING_MAX_AGE_MS, type PlanWindow } from '@mirante/shared';
+import type { Translate } from './i18n.js';
 
 /**
  * What one plan window can honestly be said to show right now.
@@ -21,4 +22,29 @@ export const readWindow = (window: PlanWindow | undefined, now: number): WindowR
     percentage: window.usedPercentage,
     ...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
   };
+};
+
+/**
+ * How old a plan reading is, in words, and whether it is old enough to doubt.
+ *
+ * Past an hour a figure is older than Claude Code itself trusts, and older
+ * than any harness refreshes one while it works.
+ */
+export const readingAge = (
+  readAt: number | undefined,
+  now: number,
+  t: Translate,
+): { text: string; old: boolean } => {
+  if (readAt === undefined || !Number.isFinite(readAt))
+    return { text: t('plan.noReading'), old: false };
+  const minutes = Math.max(0, Math.round((now - readAt) / 60_000));
+  const text =
+    minutes < 1
+      ? t('plan.ago.justNow')
+      : minutes <= 5
+        ? t('plan.ago.minutes', { n: minutes })
+        : t('plan.lastUsed', {
+            d: minutes < 60 ? `${minutes}min` : `${Math.round(minutes / 60)}h`,
+          });
+  return { text, old: now - readAt > PLAN_READING_MAX_AGE_MS };
 };

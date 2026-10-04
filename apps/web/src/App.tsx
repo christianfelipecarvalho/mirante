@@ -1,38 +1,20 @@
-import { useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { Harness } from '@mirante/shared';
 import { useArchive } from './lib/archive';
 import { useBoard, type Connection } from './lib/client';
 import { useI18n } from './lib/i18n';
 import { useNow } from './lib/now';
-import {
-  groupProjects,
-  partitionStale,
-  type ProjectActivity,
-  type ProjectGroup,
-} from './lib/projects';
+import { summarizeBoard } from './lib/project-summary';
+import { groupProjects, partitionStale } from './lib/projects';
 import { BoardSkeleton } from './components/BoardSkeleton';
-import { Icon, type IconName } from './components/Icon';
+import { BoardSummary } from './components/BoardSummary';
+import { BudgetAlerts } from './components/BudgetAlerts';
 import { LatestRequest } from './components/LatestRequest';
 import { ProjectBar } from './components/ProjectBar';
+import { ProjectCard, QuietProjects } from './components/ProjectCard';
 import { SessionDetail } from './components/SessionDetail';
-import { SessionLaneView } from './components/SessionLane';
 import { Timeline } from './components/Timeline';
 import { TopBar } from './components/TopBar';
-
-const STATE_ICON: Record<ProjectActivity, IconName> = {
-  needs_you: 'alert',
-  working: 'play',
-  blocked: 'pause',
-  idle: 'dot',
-  finished: 'check',
-};
-
-const STATE_COLOR: Record<ProjectActivity, string> = {
-  needs_you: 'var(--status-warning)',
-  working: 'var(--accent)',
-  blocked: 'var(--status-serious)',
-  idle: 'var(--text-muted)',
-  finished: 'var(--text-muted)',
-};
 
 export const App = () => {
   const { board, events, definitions, connection, decide, refreshPlanUsage } = useBoard();
@@ -40,7 +22,8 @@ export const App = () => {
   const { archived, archive, restoreAll } = useArchive();
   const now = useNow();
   const [project, setProject] = useState('all');
-  const [hideFinished, setHideFinished] = useState(false);
+  // Both coding agents by default; either one on its own, from the summary line.
+  const [harness, setHarness] = useState<Harness | 'all'>('all');
   // Checked on every load, never remembered: old sessions are the exception.
   const [hideOld, setHideOld] = useState(true);
   // The open session lives in the URL, so a particular session can be bookmarked
@@ -52,7 +35,14 @@ export const App = () => {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (openSessionId) url.searchParams.set('session', openSessionId);
-    else url.searchParams.delete('session');
+    else {
+      url.searchParams.delete('session');
+      // Agent and tab belong to a session detail. Leaving them behind makes a
+      // different session reopen on an unrelated old tab instead of its live
+      // topology.
+      url.searchParams.delete('tab');
+      url.searchParams.delete('agent');
+    }
     window.history.replaceState({}, '', url);
   }, [openSessionId]);
 
@@ -62,26 +52,62 @@ export const App = () => {
     () => partitionStale(board.sessions, board.timeline, now),
     [board.sessions, board.timeline, now],
   );
-  const groups = useMemo(
-    () => groupProjects(hideOld ? current : board.sessions, board.timeline, now),
-    [hideOld, board.sessions, current, board.timeline, now],
+  const inScope = hideOld ? current : board.sessions;
+  // Every project, archived ones included: how many exist decides whether an
+  // empty board means "nothing yet" or "all put away".
+  const everyGroup = useMemo(
+    () => groupProjects(inScope, board.timeline, now),
+    [inScope, board.timeline, now],
   );
   // An archived project that starts waiting on a decision comes back. Archiving
   // hides noise; it must never hide a request for your approval.
+  const unarchived = useMemo(
+    () => everyGroup.filter((group) => !archived.has(group.key) || group.activity === 'needs_you'),
+    [everyGroup, archived],
+  );
+  // The summary counts every harness, so it can offer the one not shown.
+  const summary = useMemo(
+    () =>
+      summarizeBoard(
+        unarchived.map((group) => group.lanes),
+        now,
+      ),
+    [unarchived, now],
+  );
+  // A harness with nothing left on the board stops filtering it: an empty board
+  // that looks like "nothing is running" would be a lie.
+  const onlyHarness =
+    harness !== 'all' &&
+    summary.harnesses.some((entry) => entry.harness === harness && entry.sessions > 0)
+      ? harness
+      : 'all';
+  // Filtered by lane, then grouped again: a project's state and order must
+  // come from the sessions shown, not from ones the filter put away.
   const shown = useMemo(
-    () => groups.filter((group) => !archived.has(group.key) || group.activity === 'needs_you'),
-    [groups, archived],
+    () =>
+      onlyHarness === 'all'
+        ? unarchived
+        : groupProjects(
+            inScope.filter((lane) => lane.harness === onlyHarness),
+            board.timeline,
+            now,
+          ).filter((group) => !archived.has(group.key) || group.activity === 'needs_you'),
+    [onlyHarness, unarchived, inScope, board.timeline, now, archived],
   );
   const visible = useMemo(
-    () =>
-      shown
-        .filter((group) => project === 'all' || group.key === project)
-        .map((group) =>
-          hideFinished ? { ...group, lanes: group.lanes.filter((l) => !l.endedAt) } : group,
-        )
-        .filter((group) => group.lanes.length > 0),
-    [shown, project, hideFinished],
+    () => shown.filter((group) => project === 'all' || group.key === project),
+    [shown, project],
   );
+  // What is alive gets a card; what has stopped becomes a row. One project
+  // chosen on its own is always a card: it was chosen to be looked at.
+  const full = visible.filter(
+    (group) => project !== 'all' || (group.activity !== 'idle' && group.activity !== 'finished'),
+  );
+  const quiet = visible.filter((group) => !full.includes(group));
+  const archiveProject = (key: string) => {
+    archive(key);
+    if (project === key) setProject('all');
+  };
 
   // The latest request follows the project filter and the archive, like the
   // board below it: selecting a project and seeing another one's request on top
@@ -103,6 +129,7 @@ export const App = () => {
   return (
     <div className="mx-auto flex h-full max-w-[1800px] flex-col gap-3 p-3">
       <TopBar board={board} connection={connection} onRefreshPlanUsage={refreshPlanUsage} />
+      <BudgetAlerts board={board} now={now} connection={connection} />
 
       {openLane ? (
         <SessionDetail
@@ -116,6 +143,8 @@ export const App = () => {
         />
       ) : (
         <>
+          <BoardSummary summary={summary} harness={onlyHarness} onHarness={setHarness} />
+
           {/* Controls sit in one row above what they control, never inside it. */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="min-w-0 flex-1">
@@ -127,17 +156,9 @@ export const App = () => {
                 onRestoreAll={restoreAll}
               />
             </div>
-            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-[11px] text-[var(--text-secondary)]">
-              <input
-                type="checkbox"
-                className="cursor-pointer"
-                checked={hideFinished}
-                onChange={(event) => setHideFinished(event.target.checked)}
-              />
-              {t('filter.hideFinished')}
-            </label>
-            {/* A filter, so a checkbox beside its sibling — never a button near
-                "Restore", which undoes something the person did. */}
+            {/* A filter, so a checkbox — never a button near "Restore", which
+                undoes something the person did. Ended sessions need no filter
+                of their own: each project folds them into one line. */}
             <label
               className="flex shrink-0 cursor-pointer items-center gap-2 text-[11px] text-[var(--text-secondary)]"
               title={t('filter.hideOldTitle')}
@@ -162,7 +183,7 @@ export const App = () => {
           />
 
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <main className="min-h-0 space-y-5 overflow-y-auto pr-1">
+            <main className="min-h-0 space-y-3 overflow-y-auto pr-1">
               {/* Loading, nothing yet, and everything put away are three different
                   answers. Only one of them is bad news. */}
               {visible.length === 0 &&
@@ -175,7 +196,7 @@ export const App = () => {
                     body={t('old.emptyBody', { n: stale.length })}
                     action={{ label: t('old.show'), onClick: () => setHideOld(false) }}
                   />
-                ) : archived.size > 0 && groups.length > 0 ? (
+                ) : archived.size > 0 && everyGroup.length > 0 ? (
                   <Notice
                     title={t('project.allArchived')}
                     body={t('project.allArchivedBody')}
@@ -191,8 +212,8 @@ export const App = () => {
                   <EmptyState connection={connection} />
                 ))}
 
-              {visible.map((group) => (
-                <ProjectSection
+              {full.map((group) => (
+                <ProjectCard
                   key={group.key}
                   group={group}
                   approvals={board.pendingApprovals}
@@ -200,12 +221,19 @@ export const App = () => {
                   definitions={definitions}
                   onOpen={setOpenSessionId}
                   now={now}
-                  onArchive={() => {
-                    archive(group.key);
-                    if (project === group.key) setProject('all');
-                  }}
+                  onArchive={() => archiveProject(group.key)}
                 />
               ))}
+
+              <QuietProjects
+                groups={quiet}
+                approvals={board.pendingApprovals}
+                onDecide={onDecide}
+                definitions={definitions}
+                onOpen={setOpenSessionId}
+                now={now}
+                onArchive={archiveProject}
+              />
             </main>
 
             <Timeline entries={board.timeline} sessionFilter={undefined} />
@@ -213,75 +241,6 @@ export const App = () => {
         </>
       )}
     </div>
-  );
-};
-
-const ProjectSection = ({
-  group,
-  approvals,
-  onDecide,
-  definitions,
-  onOpen,
-  onArchive,
-  now,
-}: {
-  group: ProjectGroup;
-  approvals: ComponentProps<typeof SessionLaneView>['approvals'];
-  onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
-  definitions: ComponentProps<typeof SessionLaneView>['definitions'];
-  onOpen: (sessionId: string) => void;
-  onArchive: () => void;
-  now: number;
-}) => {
-  const { t } = useI18n();
-
-  return (
-    <section className="group/project">
-      <header className="mb-2 flex items-center gap-2 px-1">
-        <span aria-hidden="true" style={{ color: STATE_COLOR[group.activity] }}>
-          <Icon name={STATE_ICON[group.activity]} size={13} />
-        </span>
-        <h2 className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
-          {group.name}
-        </h2>
-        <span className="text-[11px]" style={{ color: STATE_COLOR[group.activity] }}>
-          {t(`project.state.${group.activity}` as 'project.state.idle')}
-        </span>
-        <span className="tabular text-[11px] text-[var(--text-muted)]">
-          {group.lanes.length === 1
-            ? t('project.sessions.one')
-            : t('project.sessions', { n: group.lanes.length })}
-        </span>
-
-        {/* Revealed on hover, but always reachable by keyboard: a control that
-            only exists on hover does not exist for a keyboard. */}
-        <button
-          type="button"
-          onClick={onArchive}
-          title={t('project.archiveTitle')}
-          className="pressable ml-auto flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-[11px] opacity-0 transition-opacity duration-200 group-hover/project:opacity-100 focus-visible:opacity-100"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          <Icon name="archive" size={12} />
-          {t('project.archive')}
-        </button>
-      </header>
-
-      <div className="space-y-3">
-        {group.lanes.map((lane) => (
-          <SessionLaneView
-            key={lane.sessionId}
-            lane={lane}
-            approvals={approvals}
-            onDecide={onDecide}
-            definitions={definitions}
-            onOpen={() => onOpen(lane.sessionId)}
-            inProject
-            now={now}
-          />
-        ))}
-      </div>
-    </section>
   );
 };
 

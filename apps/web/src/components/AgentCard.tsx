@@ -11,8 +11,10 @@ import {
 } from '../lib/agents';
 import { agentIcon } from '../lib/icons';
 import { Icon, type IconName } from './Icon';
+import { ModelName } from './ModelName';
 import { useI18n, type Translate } from '../lib/i18n';
 import { livenessOf } from '../lib/liveness';
+import { usePointerGlow } from '../lib/pointer-glow';
 import { StateBadge } from './StateBadge';
 
 /**
@@ -26,13 +28,19 @@ import { StateBadge } from './StateBadge';
 export const waitingText = (waitingOn: WaitingOn, t: Translate): string => {
   switch (waitingOn.reason) {
     case 'subagent':
-      return t('waiting.subagent', { subject: waitingOn.subject ?? '' });
+      // No subject means the rest of the team — its coordinator, usually —
+      // rather than agents this one started.
+      return waitingOn.subject
+        ? t('waiting.subagent', { subject: waitingOn.subject })
+        : t('waiting.team');
     case 'approval':
       return waitingOn.detail
         ? `${t('waiting.approval', { subject: waitingOn.subject ?? '' })}: ${waitingOn.detail}`
         : t('waiting.approval', { subject: waitingOn.subject ?? '' });
     case 'input':
-      return t('waiting.input');
+      // The question itself, when the agent asked one: "waiting for your
+      // reply" alone does not say what the reply is to.
+      return waitingOn.detail ? `${t('waiting.input')}: ${waitingOn.detail}` : t('waiting.input');
     case 'plan_limit': {
       const window = waitingOn.subject;
       return window === 'fiveHour' || window === 'sevenDay' || window === 'spendLimit'
@@ -43,6 +51,10 @@ export const waitingText = (waitingOn: WaitingOn, t: Translate): string => {
       return waitingOn.summary;
   }
 };
+
+/** Where a card can be found on the page, so a request elsewhere can lead to it. */
+export const agentAnchor = (sessionId: string, agentId: string): string =>
+  `agent-${sessionId}-${agentId}`;
 
 export type AgentCardProps = {
   card: Card;
@@ -74,6 +86,7 @@ export const AgentCardView = ({
   sessionEnded = false,
 }: AgentCardProps) => {
   const { t } = useI18n();
+  const onPointerMove = usePointerGlow();
   // An author who gave their agent a colour gets it; the assigned slot is a
   // fallback for agents that never declared one.
   const color = definitionColor(definition) ?? assignedColor;
@@ -101,15 +114,22 @@ export const AgentCardView = ({
 
   return (
     <article
-      className={`pressable relative overflow-hidden rounded-lg border py-3 pl-4 pr-3 focus-within:border-[var(--accent)] ${
-        onOpen ? 'cursor-pointer hover:border-[var(--accent)]' : ''
+      id={agentAnchor(card.sessionId, card.agentId)}
+      className={`glow-card lantern relative overflow-hidden rounded-lg border py-3 pl-4 pr-3 ${
+        onOpen ? 'cursor-pointer' : ''
       }`}
-      style={{
-        background: 'var(--surface-1)',
-        borderColor: waiting
-          ? 'color-mix(in oklab, var(--status-warning) 45%, var(--hairline))'
-          : 'var(--hairline)',
-      }}
+      // Lit while the agent is really working, warned while it waits on a
+      // person, dark at rest. See the card section in index.css.
+      data-life={liveness === 'live' ? 'working' : waiting ? 'waiting' : 'rest'}
+      data-beam={liveness === 'live'}
+      style={
+        {
+          // The light is the agent's own colour, so a lane of working agents
+          // reads as several lit windows rather than one alarm.
+          '--glow': waiting ? 'var(--status-warning)' : color,
+        } as CSSProperties
+      }
+      onPointerMove={onPointerMove}
       onClick={onOpen}
     >
       {/*
@@ -121,19 +141,12 @@ export const AgentCardView = ({
       */}
       <span
         aria-hidden="true"
-        className="absolute inset-y-0 left-0 w-[3px]"
+        className="card-rail absolute inset-y-0 left-0 w-[3px]"
         style={{ background: waiting ? 'var(--status-warning)' : color }}
       />
-      {liveness === 'live' && (
-        <span
-          aria-hidden="true"
-          className="card-loading"
-          style={{ '--bar': color } as CSSProperties}
-        />
-      )}
       <header className="flex items-start gap-2.5">
         <span
-          className="grid size-8 shrink-0 place-items-center rounded-full"
+          className="card-mark grid size-8 shrink-0 place-items-center rounded-full"
           style={{ background: `color-mix(in oklab, ${color} 18%, transparent)`, color }}
         >
           {/* An inferred role has a mark of its own; otherwise the type decides. */}
@@ -149,9 +162,29 @@ export const AgentCardView = ({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
-              {identity.name}
-            </span>
+            {/*
+              The name is the card's control, not the card itself. An <article>
+              with an onClick is unreachable by keyboard and announced as
+              nothing; a button around the whole card cannot hold the approval
+              buttons inside it. So the name carries the action, exactly as the
+              lane header above already does.
+            */}
+            {onOpen ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpen();
+                }}
+                className="cursor-pointer truncate text-left text-[13px] font-semibold text-[var(--text-primary)] transition-colors duration-200 hover:text-[var(--accent)]"
+              >
+                {identity.name}
+              </button>
+            ) : (
+              <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
+                {identity.name}
+              </span>
+            )}
             {/* Agents sharing a type are otherwise impossible to tell apart. */}
             {ordinal !== undefined && (
               <span
@@ -184,6 +217,13 @@ export const AgentCardView = ({
 
         <StateBadge status={card.status} override={override} title={badgeTitle} />
       </header>
+
+      {/*
+        What this agent was asked to do, quoted. Same geometry as the waiting
+        block below — one kind of quoted thing on a card — but ruled in the
+        agent's own colour, because the status palette is reserved for state.
+      */}
+      {!isRoot && <BriefBlock card={card} color={color} />}
 
       {card.status.waitingOn ? (
         <div
@@ -227,12 +267,21 @@ export const AgentCardView = ({
         </div>
       )}
 
-      <footer className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-muted)]">
+      {/* Tokens and time are what people come back to the footer for, so the
+          figures take the primary colour and their unit the secondary. */}
+      <footer className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-secondary)]">
         <span className="tabular">
-          {formatTokens(card.tokens)} {t('card.tokens')}
+          <span className="font-medium text-[var(--text-primary)]">
+            {formatTokens(card.tokens)}
+          </span>{' '}
+          {t('card.tokens')}
         </span>
-        <span className="tabular">{formatDuration(card.startedAt, card.endedAt)}</span>
-        {card.model && <span className="truncate">{card.model}</span>}
+        <span className="tabular font-medium text-[var(--text-primary)]">
+          {formatDuration(card.startedAt, card.endedAt)}
+        </span>
+        {/* Where the raw id used to be, now readable and at the same weight as
+            the figures beside it. */}
+        <ModelName model={card.model} />
         {card.activeSkill && (
           <span
             className="rounded px-1.5 py-0.5 text-[10px]"
@@ -252,6 +301,51 @@ export const AgentCardView = ({
         )}
       </footer>
     </article>
+  );
+};
+
+/**
+ * The instruction this agent was given.
+ *
+ * The task line above is the headline its caller typed — three to eight words.
+ * This is the work itself, and for a subagent it is the only thing that says
+ * why it exists. When the board never saw the spawn there is nothing to quote,
+ * and a card with no task either says so rather than leaving a silent gap.
+ */
+const BriefBlock = ({ card, color }: { card: Card; color: string }) => {
+  const { t } = useI18n();
+
+  if (!card.brief) {
+    if (card.task) return null;
+    return (
+      <div
+        className="mt-2 rounded border-l-2 py-1 pl-2 text-[11px] text-[var(--text-secondary)]"
+        style={{ borderColor: 'var(--baseline)', background: 'var(--surface-2)' }}
+      >
+        <span className="flex items-center gap-1.5">
+          <Icon name="unknown" size={11} />
+          {t('brief.missing')}
+        </span>
+        <span className="mt-0.5 block">{t('brief.missingWhy')}</span>
+      </div>
+    );
+  }
+
+  const cut =
+    card.briefCharCount !== undefined && card.briefCharCount > card.brief.length
+      ? t('brief.kept', { kept: card.brief.length, total: card.briefCharCount })
+      : undefined;
+
+  return (
+    <div
+      className="mt-2 rounded border-l-2 py-1 pl-2 text-[12px]"
+      style={{ borderColor: color, background: 'var(--surface-2)' }}
+    >
+      <blockquote className="line-clamp-2 text-[var(--text-primary)]" title={card.brief}>
+        {card.brief}
+      </blockquote>
+      {cut && <div className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{cut}</div>}
+    </div>
   );
 };
 
@@ -281,6 +375,8 @@ const ActivityLine = ({
   // What the person typed is quoted under the prompt chevron: "“.”" reads as a
   // character someone typed, where "Prompt: ." read as a broken sentence.
   const fromPerson = !current && card.lastActivityKind === 'prompt';
+  // The agent's own sentence, unquoted: it is not being cited, it is speaking.
+  const fromAgent = !current && card.lastActivityKind === 'said';
   const text = fromPerson ? `“${previous ?? ''}”` : (current ?? previous);
 
   return (
@@ -288,19 +384,30 @@ const ActivityLine = ({
       {/* Still: the one thing on the board that moves on its own is a project
           waiting on you, and it only stands out if nothing else pulses. */}
       <span className="mt-[2px] shrink-0" style={{ color: running ? color : 'var(--text-muted)' }}>
-        <Icon name={running ? 'play' : fromPerson ? 'prompt' : 'back'} size={11} />
+        <Icon
+          name={running ? 'play' : fromPerson ? 'prompt' : fromAgent ? 'speech' : 'back'}
+          size={11}
+        />
       </span>
       <div className="min-w-0">
         <div
-          className="truncate"
-          style={{ color: current ? 'var(--text-secondary)' : 'var(--text-muted)' }}
+          // What the agent wrote gets two lines and its full colour: it is the
+          // one line on the card a person reads rather than scans.
+          className={fromAgent ? 'line-clamp-2' : 'truncate'}
+          style={{
+            color: current || fromAgent ? 'var(--text-secondary)' : 'var(--text-muted)',
+          }}
           title={text}
         >
           {text}
         </div>
         {!current && (
           <div className="text-[10px] text-[var(--text-muted)]">
-            {fromPerson ? t('card.lastMessage') : t('card.lastAction')}
+            {fromPerson
+              ? t('card.lastMessage')
+              : fromAgent
+                ? t('card.wrote')
+                : t('card.lastAction')}
           </div>
         )}
       </div>

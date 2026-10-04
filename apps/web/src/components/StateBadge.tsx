@@ -31,8 +31,11 @@ export type BadgeOverride = 'interrupted' | 'silent';
 const OVERRIDE_META: Record<BadgeOverride, Meta> = {
   // Orange and a pause, not red and a cross: nothing broke. The plan said stop.
   interrupted: { icon: 'pause', color: 'var(--status-serious)' },
-  // Muted and hollow: this is not a state, it is the absence of one.
-  silent: { icon: 'circle', color: 'var(--text-muted)' },
+  // Absent data, drawn as absent data: the dashed mark this board already uses
+  // for what it does not know. It used to borrow `circle`, which also means
+  // idle and also means "all agents" — three meanings on one mark, and the one
+  // that made a silent card and a finished card look alike.
+  silent: { icon: 'unknown', color: 'var(--text-secondary)' },
 };
 
 export const StateBadge = ({
