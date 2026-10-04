@@ -28,3 +28,4 @@ This is enforced, not merely stated:
 
 - [ADR-0006](0006-plan-limits-on-demand.md) — reading plan limits through Claude Code's own local `/usage` command, on demand only. Mirante still makes no outbound call and still reads no credential; the ADR records why that is nonetheless a decision and not a detail.
 - [ADR-0007](0007-cached-plan-figure-refreshes-itself.md) — while an agent is working, Mirante runs Claude Code's `/usage` once a minute. No tokens; Claude Code, not Mirante, contacts Anthropic about the account. Stops itself if `/usage` ever costs tokens.
+- [ADR-0008](0008-observe-codex-from-its-rollout-files.md) — OpenAI Codex is observed from the rollout files it writes, and from nothing else: `~/.codex/auth.json` is never opened, nothing is sent to OpenAI, and Codex work never starts the `/usage` reading of ADR-0007. The ChatGPT web and desktop apps keep their conversations on OpenAI's servers and are out of reach by this ADR.

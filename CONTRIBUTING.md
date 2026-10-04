@@ -92,7 +92,7 @@ docs(event-map): record async subagent divergence
 
 Before opening a PR: run `pnpm check`, add a test for behavior you changed, and update `docs/EVENT_MAP.md` if you touched parsing.
 
-CI runs format, lint, typecheck, and tests on Node 22 and 24.
+CI runs format, lint, typecheck, and tests on Node 22 and 24, and a `package` job that stages the npm package, installs the tarball into an empty project and runs it. If you touch what ships to npm, run `pnpm release:build && pnpm release:smoke` yourself; [docs/RELEASING.md](docs/RELEASING.md) explains why the step exists and how a release is cut.
 
 ## Good first issues
 

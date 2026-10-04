@@ -12,7 +12,7 @@ Mirante is a local, browser-based board that answers those questions while you k
 
 ## Status
 
-**Pre-release — M1 feature-complete, not yet published to npm.** Everything below works today from a clone; the `npx` route arrives with the first release. See [Run from source](#run-from-source) and the [roadmap](#roadmap).
+**Pre-release (`0.1.0-alpha`) — M1 feature-complete.** Published on npm as [`mirante`](https://www.npmjs.com/package/mirante); see [Install](#install). Expect rough edges and breaking changes between alphas. See the [roadmap](#roadmap).
 
 ---
 
@@ -21,6 +21,8 @@ Mirante is a local, browser-based board that answers those questions while you k
 Mirante **observes**. It does not run Claude Code and it does not replace your workflow.
 
 You keep starting sessions exactly as you do today — `claude` in a terminal, the VS Code extension, `claude -p` in a script. Mirante installs a set of hooks and a status line, reads the session transcripts Claude Code already writes to disk, and renders everything on a live board.
+
+**OpenAI Codex too.** If you also run Codex — the coding agent behind ChatGPT, in the terminal or the VS Code extension — its sessions appear on the same board, each labelled with the agent that runs it, a filter shows either one on its own, and Codex's plan limits sit beside Claude Code's in the top bar. Mirante reads the rollout files Codex already writes under `~/.codex/sessions` (or `$CODEX_HOME`), and nothing else: no Codex setting is touched, `auth.json` is never opened, nothing is sent to OpenAI. The ChatGPT web and desktop apps keep their conversations on OpenAI's servers and cannot be observed without the network, which Mirante does not use. See [ADR-0008](docs/adr/0008-observe-codex-from-its-rollout-files.md).
 
 ```
    Claude Code sessions                  mirantd (127.0.0.1)              Board
@@ -33,47 +35,79 @@ You keep starting sessions exactly as you do today — `claude` in a terminal, t
    ~/.claude.json (cached plan figure) ─▶ read ───┘
 ```
 
-One normalized event contract, fed by:
+The board folds one normalized event contract.
 
-| Source                 | Role                                                                                                                                                         |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Hooks**              | Primary real-time signal. Push, low latency.                                                                                                                 |
-| **Transcript JSONL**   | Source of truth for content, token usage, the agent tree, when a subagent ends and why, and when a request was refused at a plan limit.                      |
-| **Status line**        | Plan usage pushed while a terminal session is open.                                                                                                          |
-| **`/usage`**           | Plan usage anywhere, including the VS Code extension. Run once a minute while an agent is working, and by "Read now": a local command that spends no tokens. |
-| **Cached plan figure** | The 5-hour and weekly figures `/usage` leaves in `~/.claude.json`. Read for free; only those two numbers are taken.                                          |
-| **OpenTelemetry**      | Optional second source for tokens and cost. Planned for M2.                                                                                                  |
+The board shows the agent tree directly inside each session with children;
+expand it to follow nested delegations or open an agent's activity. Working
+projects retain a lit frame in the project filter row.
+
+Preventive allowance alerts appear at 80% and 90% usage, using readings no older
+than five minutes. They offer a local recovery export and an instruction for
+the coordinator to save a summary and wait for permission to continue. These
+are advisory margins, not a completion forecast or paid-credit balance.
+Observer mode cannot pause agents or guarantee that credits remain for a summary.
+
+The normalized event sources are:
+
+| Source                 | Role                                                                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Hooks**              | Primary real-time signal. Push, low latency.                                                                                                                                   |
+| **Transcript JSONL**   | Source of truth for content, token usage, the agent tree, what each agent says in its own words, when a subagent ends and why, and when a request was refused at a plan limit. |
+| **Status line**        | Plan usage pushed while a terminal session is open.                                                                                                                            |
+| **`/usage`**           | Plan usage anywhere, including the VS Code extension. Run once a minute while an agent is working, and by "Read now": a local command that spends no tokens.                   |
+| **Cached plan figure** | The 5-hour and weekly figures `/usage` leaves in `~/.claude.json`. Read for free; only those two numbers are taken.                                                            |
+| **OpenTelemetry**      | Optional second source for tokens and cost. Planned for M2.                                                                                                                    |
 
 Every source is normalized into the same append-only event stream before it reaches the UI. Nothing raw from a hook or a transcript is ever sent to the front end.
 
 ## Install
 
-Two commands:
+Mirante is published on npm as [`mirante`](https://www.npmjs.com/package/mirante).
+
+**You need:** Node.js **22.13 or newer**, and Claude Code (the terminal or the VS Code extension).
+
+### Try it without installing anything
 
 ```bash
 npx mirante install   # wires hooks and the status line into your Claude Code settings
 npx mirante           # starts the daemon and serves the board on http://127.0.0.1:7788
 ```
 
-Then open Claude Code the way you always do. The board fills itself.
-
-To check that everything is wired up:
+### Or install it globally
 
 ```bash
-npx mirante doctor
+npm install -g mirante
+mirante install
+mirante
 ```
 
-To remove it completely:
+A global install puts `mirante` on your `PATH`, which is handier for `stop`, `doctor` and `purge`, and avoids re-downloading the package whenever the `npx` cache is cleared. Nothing `install` writes into your Claude Code settings points into that cache, so both routes behave the same.
+
+Then open Claude Code the way you always do. The board fills itself.
+
+> **Native module.** Mirante keeps its event log in `better-sqlite3`, which has a native part. npm downloads a prebuilt binary where one exists; otherwise it compiles one, which needs a C++ toolchain (`build-essential` on Debian and Ubuntu, the Xcode command line tools on macOS). That download is npm installing the package. Mirante itself makes no outbound call.
+
+### Check it, update it, remove it
 
 ```bash
-npx mirante uninstall
+mirante doctor                  # are hooks firing, is the status line reporting, are transcripts read?
+npm update -g mirante           # or: npx mirante@latest ...
+mirante install                 # safe to re-run after an update
+```
+
+To remove it completely, undo the settings first, then the package:
+
+```bash
+mirante uninstall               # reverses exactly what install wrote
+mirante purge --yes             # optional: deletes everything Mirante stored
+npm uninstall -g mirante        # only if you installed it globally
 ```
 
 `install` writes only inside a demarcated block, backs up every file it touches with a timestamp, merges without destroying hooks or a status line you already had, and prints exactly what changed. `uninstall` reverses precisely that block and restores your previous status line.
 
 ## Run from source
 
-Until the first npm release, this is the way in. Requires Node 22.13+ and pnpm.
+For contributors, or to try a commit that is not released yet. Requires Node 22.13+ and pnpm.
 
 ```bash
 git clone https://github.com/christianfelipecarvalho/mirante.git
@@ -84,6 +118,10 @@ pnpm build
 node packages/cli/dist/bin.js install   # or: pnpm mirante install
 node packages/cli/dist/bin.js           # starts the daemon, prints the board URL
 ```
+
+`pnpm daemon` rebuilds both the server and the board before starting on port
+7788, including changes to the agent tree. For live code updates, `pnpm dev`
+runs the board with hot reload on port 7789 and the API on port 7788.
 
 Try it against a throwaway configuration first — `MIRANTE_HOME` and `--settings` keep it
 entirely out of your real setup:
@@ -103,7 +141,7 @@ These are hard rules, not defaults:
 - **Mirante never reads, stores, or transmits a credential.** It does not touch Claude Code credential files, has no login of its own, and never calls `api.anthropic.com`.
 - **Nothing leaves your machine.** No telemetry, no account, no remote server. There is a test in CI asserting no outbound network call is made.
 - **The daemon binds to `127.0.0.1` only**, requires a token generated at install time, and validates the `Origin` header.
-- **Prompts and tool inputs can contain secrets.** They are stored locally, redaction is configurable, and `mirante purge` wipes stored data.
+- **Prompts, tool inputs, and what the agents write back can contain secrets.** They are stored locally, truncated and scrubbed for key-shaped strings on the way in, redaction is configurable, and `mirante purge` wipes stored data. The reasoning Claude Code streams to a terminal is never stored, by anyone: it reaches the transcript with an empty field and a signature.
 - **Two numbers, nothing else, from Claude Code's state file.** To show plan limits outside the terminal, Mirante reads the 5-hour and weekly figures Claude Code already caches in `~/.claude.json`. A strict schema extracts those two windows and nothing more; the account's identity in the same file is never stored, logged, or sent, and a test asserts it. Credential files are never opened. See [ADR-0007](docs/adr/0007-cached-plan-figure-refreshes-itself.md).
 - **`/usage` runs only while an agent is working.** Once a minute then, and when you press "Read now"; never while idle. It spends no tokens — checked on every run, and the automatic reading stops itself if that ever changes — but Claude Code does contact Anthropic about your account when it runs. Each run removes the one transcript it leaves behind. `MIRANTE_PLAN_POLL_MS=0` turns it off. See [ADR-0007](docs/adr/0007-cached-plan-figure-refreshes-itself.md).
 

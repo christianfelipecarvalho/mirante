@@ -31,7 +31,7 @@ They chose the first.
 ## Decision
 
 Every 60 seconds, **only while some agent is working**, the daemon runs `/usage`. "Working"
-is the rule the board's loading bar uses: a card that is thinking or running a tool, heard
+is the rule the board's lit cards use: a card that is thinking or running a tool, heard
 from in the last 30 minutes, in a session that has not ended. With nothing working, nothing
 runs — plan usage rises only when requests are made, so reading it while idle would spend a
 process to learn nothing. The "reached zero" moment needs no reading either: the board works

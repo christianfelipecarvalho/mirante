@@ -1,6 +1,6 @@
 # Architecture
 
-Mirante is a local observer. It watches Claude Code sessions that are already running on the machine and renders them as a live board. It never starts, drives, or proxies a session in v1.
+Mirante is a local observer. It watches coding-agent sessions that are already running on the machine — Claude Code and OpenAI Codex — and renders them as a live board. It never starts, drives, or proxies a session in v1.
 
 ## Layers
 
@@ -10,6 +10,7 @@ Mirante is a local observer. It watches Claude Code sessions that are already ru
 │ transcript  (tail)   │──▶│                         (SQLite)    │   │ timeline   │
 │ status line (push)   │──▶│            └─▶ projector ─▶ state   │──▶│ top bar    │
 │ plan cache  (poll)   │──▶│                                      │   │ approvals  │
+│ codex rollout (tail) │──▶│                                      │   │            │
 │ otel        (M2)     │──▶│                                      │   │            │
 └──────────────────────┘   └──────────────────────────────────────┘   └────────────┘
 ```
@@ -60,6 +61,10 @@ Two constraints shape that wrapper. Claude Code debounces status line updates at
 ### Cached plan figure — plan usage from anywhere
 
 Claude Code keeps its last plan reading in `~/.claude.json` (`cachedUsageUtilization`), and writes it when `/usage` fetches it — not as it works. So while any agent is working, the daemon runs `/usage` once a minute, then reads the fresh figure from that file: only when the file changed, only the two windows, refused if written for another account or more than an hour ago, and appended only when the figure is new. With nothing working, nothing runs. This is what gives an editor-only user limits at all. The "Read now" button runs `/usage` at once. The projector keeps the newest reading by time, whichever surface it came from. See [ADR-0006](docs/adr/0006-plan-limits-on-demand.md) and [ADR-0007](docs/adr/0007-cached-plan-figure-refreshes-itself.md).
+
+### Codex rollouts — the second harness
+
+OpenAI Codex writes one JSONL file per thread under `$CODEX_HOME/sessions/YYYY/MM/DD/`. Mirante tails those files — only those; never `auth.json` beside them — from a byte offset, because a Codex root runs to tens of megabytes. Every thread names its root session and its parent in its first line, so a whole Codex team folds into one lane with the same recorded edges as a Claude Code one. Each lane carries its `harness` (`claude-code` or `codex`), which the board names; plan limits, and the `/usage` reading behind them, stay Claude Code's. See [ADR-0008](docs/adr/0008-observe-codex-from-its-rollout-files.md) and [docs/EVENT_MAP.md](docs/EVENT_MAP.md) §9.
 
 ### OpenTelemetry — optional, M2
 
