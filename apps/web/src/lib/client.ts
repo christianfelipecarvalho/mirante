@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BoardProjector, emptyBoard, type BoardState, type MiranteEvent } from '@mirante/shared';
 import type { AgentDefinition } from './agents';
+import { collectEventPages, type EventPage } from './event-pages';
 
 /**
  * The token reaches the page through the URL the CLI prints, then lives in
@@ -48,8 +49,8 @@ export type BoardClient = {
   /**
    * Asks the daemon to read plan limits now.
    *
-   * Nothing polls: limits are fetched when the person asks for them, and the
-   * board says how old the reading is in between. See ADR-0006.
+   * The daemon refreshes once a minute while an observed agent is working.
+   * This also allows an immediate reading; its age stays visible in between.
    */
   refreshPlanUsage: () => Promise<PlanUsageRefresh>;
 };
@@ -83,12 +84,21 @@ export const useBoard = (): BoardClient => {
     let disposed = false;
     let socket: WebSocket | undefined;
     let retry: number | undefined;
+    let recovery: Promise<void> | undefined;
     // Events that arrive while the backlog is still loading are held, not
     // dropped: folding them out of order would misreport the board.
     let buffered: MiranteEvent[] = [];
     let ready = false;
 
     const token = tokenRef.current;
+
+    const readEventPage = async (since: number): Promise<EventPage> => {
+      const response = await fetch(`/api/events?since=${since}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error(`event recovery failed: ${response.status}`);
+      return (await response.json()) as EventPage;
+    };
 
     const applyEvents = (incoming: MiranteEvent[]) => {
       if (incoming.length === 0) return;
@@ -98,6 +108,38 @@ export const useBoard = (): BoardClient => {
       for (const event of fresh) projector.apply(event);
       setBoard(projector.snapshot());
       setEvents((previous) => [...previous, ...fresh]);
+    };
+
+    /**
+     * Closes the small race between the REST backlog and the WebSocket.
+     *
+     * The socket announces the newest snapshot id when it opens. If something
+     * happened after our GET but before that connection, fetch from the exact
+     * id already projected while live events wait in `buffered`. Event ids are
+     * gapless, so the same path also repairs a gap after a reconnect.
+     */
+    const recoverGap = (): Promise<void> => {
+      if (recovery) return recovery;
+      ready = false;
+      recovery = (async () => {
+        const since = projectorRef.current.snapshot().lastEventId;
+        const body = await readEventPage(since);
+        applyEvents(await collectEventPages(body, readEventPage));
+        ready = true;
+        const queued = buffered;
+        buffered = [];
+        applyEvents(queued.sort((a, b) => a.id - b.id));
+      })()
+        .catch(() => {
+          // Reconnecting starts from a fresh backlog. Do not apply a later
+          // event over a missing one and make the graph show an impossible
+          // transition.
+          socket?.close();
+        })
+        .finally(() => {
+          recovery = undefined;
+        });
+      return recovery;
     };
 
     const connect = async () => {
@@ -110,11 +152,12 @@ export const useBoard = (): BoardClient => {
           setConnection('unauthorized');
           return;
         }
-        const body = (await response.json()) as { events: MiranteEvent[] };
+        const body = (await response.json()) as EventPage;
+        const backlog = await collectEventPages(body, readEventPage);
         projectorRef.current = new BoardProjector();
-        projectorRef.current.applyAll(body.events);
+        projectorRef.current.applyAll(backlog);
         setBoard(projectorRef.current.snapshot());
-        setEvents(body.events);
+        setEvents(backlog);
         ready = true;
         applyEvents(buffered);
         buffered = [];
@@ -148,9 +191,25 @@ export const useBoard = (): BoardClient => {
       socket.onmessage = (message) => {
         const data = JSON.parse(message.data as string) as
           { type: 'events'; events: MiranteEvent[] } | { type: 'snapshot'; state: BoardState };
-        if (data.type !== 'events') return;
-        if (ready) applyEvents(data.events);
-        else buffered = [...buffered, ...data.events];
+        if (data.type === 'snapshot') {
+          if (data.state.lastEventId > projectorRef.current.snapshot().lastEventId) {
+            void recoverGap();
+          }
+          return;
+        }
+        if (!ready) {
+          buffered = [...buffered, ...data.events];
+          return;
+        }
+        const next = data.events.find(
+          (event) => event.id > projectorRef.current.snapshot().lastEventId,
+        );
+        if (next && next.id > projectorRef.current.snapshot().lastEventId + 1) {
+          buffered = [...buffered, ...data.events];
+          void recoverGap();
+          return;
+        }
+        applyEvents(data.events);
       };
       socket.onclose = () => {
         if (disposed) return;

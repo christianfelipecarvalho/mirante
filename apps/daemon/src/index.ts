@@ -16,6 +16,8 @@ export { locateSessions, locateSession } from './ingest/transcript/locate.js';
 export { readCachedUsageFile } from './ingest/plan-usage-cache.js';
 export type { CacheFailure } from './ingest/plan-usage-cache.js';
 export { TranscriptWatcher } from './ingest/transcript/watcher.js';
+export { CodexWatcher, locateRollouts } from './ingest/codex/watcher.js';
+export { parseRolloutLines, createThreadState } from './ingest/codex/parse.js';
 export { createDaemon } from './server/index.js';
 export {
   inspectPort,

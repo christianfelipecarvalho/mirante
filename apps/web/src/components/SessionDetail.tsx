@@ -8,12 +8,17 @@ import { agentOrdinals, describeAgent, type AgentDefinition } from '../lib/agent
 import { agentColor } from '../lib/palette';
 import { buildSteps } from '../lib/steps';
 import { buildTurns, type Turn } from '../lib/turns';
+import { useNow } from '../lib/now';
 import { ActivityStream } from './ActivityStream';
+import { AgentFlow } from './AgentFlow';
 import { Icon, type IconName } from './Icon';
 import { AgentCardView } from './AgentCard';
+import { ModelName } from './ModelName';
 import { StateBadge } from './StateBadge';
+import { entryLabel } from './SessionLane';
 
-type Tab = 'agents' | 'activity' | 'requests';
+type Tab = 'flow' | 'agents' | 'activity' | 'requests';
+const TABS: readonly Tab[] = ['flow', 'agents', 'activity', 'requests'];
 
 export type SessionDetailProps = {
   lane: SessionLane;
@@ -33,10 +38,14 @@ export const SessionDetail = ({
   onClose,
 }: SessionDetailProps) => {
   const { t } = useI18n();
+  const now = useNow(1_000);
   // Tab and agent live in the URL alongside the session, so a particular agent's
   // activity can be linked to directly and survives a reload.
   const params = new URLSearchParams(window.location.search);
-  const [tab, setTab] = useState<Tab>((params.get('tab') as Tab | null) ?? 'agents');
+  const requestedTab = params.get('tab');
+  const [tab, setTab] = useState<Tab>(
+    TABS.includes(requestedTab as Tab) ? (requestedTab as Tab) : 'flow',
+  );
   const [agentId, setAgentId] = useState<string | undefined>(params.get('agent') ?? undefined);
 
   useEffect(() => {
@@ -85,14 +94,29 @@ export const SessionDetail = ({
             {lane.projectName}
           </h2>
           {lane.gitBranch && (
-            <span className="text-[11px] text-[var(--text-secondary)]">⑂ {lane.gitBranch}</span>
+            <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
+              <Icon name="branch" size={11} />
+              {lane.gitBranch}
+            </span>
           )}
           <span
-            className="rounded px-1.5 py-0.5 text-[10px]"
-            style={{ background: 'var(--surface-1)', color: 'var(--text-muted)' }}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+            style={{ background: 'var(--surface-1)', color: 'var(--text-secondary)' }}
           >
-            {t(`entry.${lane.entrypoint}` as 'entry.cli')}
+            <Icon name="harness" size={11} />
+            {t(`harness.${lane.harness}`)}
           </span>
+          <span className="text-[11px]">
+            <ModelName model={lane.model} />
+          </span>
+          {entryLabel(lane, t) && (
+            <span
+              className="rounded px-1.5 py-0.5 text-[10px]"
+              style={{ background: 'var(--surface-1)', color: 'var(--text-muted)' }}
+            >
+              {entryLabel(lane, t)}
+            </span>
+          )}
           <span className="ml-auto flex items-center gap-4 text-[11px] text-[var(--text-muted)]">
             <span className="tabular">
               {formatTokens(lane.tokens)} {t('card.tokens')}
@@ -107,7 +131,7 @@ export const SessionDetail = ({
         </div>
 
         <nav className="mt-3 flex gap-1">
-          {(['agents', 'activity', 'requests'] as Tab[]).map((name) => (
+          {TABS.map((name) => (
             <button
               key={name}
               type="button"
@@ -118,7 +142,8 @@ export const SessionDetail = ({
                 color: tab === name ? 'var(--text-primary)' : 'var(--text-secondary)',
               }}
             >
-              {t(`detail.tab.${name}` as 'detail.tab.agents')}
+              {t(`detail.tab.${name}`)}
+              {name === 'flow' && ` (${lane.cards.length})`}
               {name === 'agents' && ` (${lane.cards.length})`}
               {name === 'requests' && ` (${turns.length})`}
             </button>
@@ -130,6 +155,27 @@ export const SessionDetail = ({
         className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
         style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
       >
+        {tab === 'flow' && (
+          <div key="flow" className="motion-safe:panel-enter min-h-0 flex-1 overflow-auto p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--text-muted)]">
+              <span className="font-medium text-[var(--text-secondary)]">{t('flow.legend')}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-px w-5 bg-[var(--accent)]" />
+                {t('flow.legend.live')}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-px w-5 border-t border-dashed border-[var(--status-warning)]" />
+                {t('flow.legend.waiting')}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-px w-5 border-t border-dashed border-[var(--text-muted)]" />
+                {t('flow.legend.closed')}
+              </span>
+            </div>
+            <AgentFlow lane={lane} now={now} onOpen={openAgent} />
+          </div>
+        )}
+
         {tab === 'agents' && (
           <div
             key="agents"

@@ -27,6 +27,7 @@ const makeDaemon = (readPlanUsage: () => Promise<PlanReading>): Daemon => {
 afterEach(async () => {
   await daemon?.close();
   daemon = undefined;
+  vi.useRealTimers();
 });
 
 const reading: PlanReading = {
@@ -265,6 +266,88 @@ describe('the automatic reading, while agents work', () => {
     expect(await instance.refreshPlanUsageAutomatically(NOW)).toBe('read');
     expect(runs).toBe(1);
     expect(instance.projector.snapshot(NOW.getTime()).planUsage?.fiveHour?.usedPercentage).toBe(67);
+  });
+
+  it('keeps reading after the display overlays a 100% plan limit', async () => {
+    const read = vi.fn(async (): Promise<PlanReading> => ({
+      ...reading,
+      at: NOW.toISOString(),
+      usage: { fiveHour: { usedPercentage: 20 } },
+    }));
+    const instance = makeDaemon(read);
+    working(instance, NOW);
+    instance.ingest(
+      instance.log.appendMany([
+        {
+          ts: NOW.toISOString(),
+          source: 'statusline',
+          sessionId: 'busy',
+          projectPath: '/w/busy',
+          agentId: 'main',
+          kind: 'plan.usage.updated',
+          payload: { usage: { fiveHour: { usedPercentage: 100, resetsAt: 4102444800 } } },
+        },
+      ]),
+    );
+    expect(instance.projector.snapshot(NOW.getTime()).sessions[0]?.cards[0]?.status.state).toBe(
+      'rate_limited',
+    );
+    expect(await instance.refreshPlanUsageAutomatically(NOW)).toBe('read');
+    expect(read).toHaveBeenCalledOnce();
+    expect(instance.projector.snapshot(NOW.getTime()).sessions[0]?.cards[0]?.status.state).toBe(
+      'thinking',
+    );
+  });
+
+  it('schedules readings every minute without a click and clears the timer on close', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(NOW);
+    const read = vi.fn(async (): Promise<PlanReading> => ({
+      ...reading,
+      at: new Date().toISOString(),
+    }));
+    daemon = createDaemon({
+      config,
+      token: TOKEN,
+      watch: false,
+      pollPlanUsage: true,
+      readPlanUsage: read,
+    });
+    const instance = daemon;
+    vi.spyOn(instance.app, 'listen').mockImplementation(async () => 'http://127.0.0.1:7788');
+    working(instance, NOW);
+    await instance.listen();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(read).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(read).toHaveBeenCalledTimes(2);
+    await instance.close();
+    daemon = undefined;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the Claude meter fresh when only Codex is working', async () => {
+    const read = vi.fn(quiet);
+    const instance = makeDaemon(read);
+    working(instance, NOW);
+    instance.ingest(
+      instance.log.appendMany([
+        {
+          ts: NOW.toISOString(),
+          source: 'codex-rollout',
+          sessionId: 'busy',
+          projectPath: '/w/busy',
+          agentId: 'main',
+          kind: 'session.started',
+          payload: { entrypoint: 'vscode', cwd: '/w/busy', harness: 'codex' },
+        },
+      ]),
+    );
+    expect(await instance.refreshPlanUsageAutomatically(NOW)).toBe('read');
+    expect(read).toHaveBeenCalledOnce();
   });
 
   it('does not count an agent silent for over half an hour as working', async () => {

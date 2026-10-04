@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
-import { BoardProjector, dedupeKeys, livenessOf, type MiranteEvent } from '@mirante/shared';
+import { BoardProjector, dedupeKeys, type MiranteEvent } from '@mirante/shared';
 import type { MiranteConfig } from '../config.js';
 import { EventLog } from '../core/eventlog.js';
 import { PermissionBroker, permissionResponse } from '../core/permissions.js';
@@ -16,6 +16,7 @@ import { readPlanUsage as readPlanUsageFrom, type PlanReading } from '../ingest/
 import { usageProbeToEvent } from '../ingest/usage-command.js';
 import { projectSlug } from '../ingest/transcript/locate.js';
 import { TranscriptWatcher } from '../ingest/transcript/watcher.js';
+import { CodexWatcher } from '../ingest/codex/watcher.js';
 import { authorize } from './auth.js';
 
 export type DaemonOptions = {
@@ -45,6 +46,7 @@ export type Daemon = {
   projector: BoardProjector;
   broker: PermissionBroker;
   watcher?: TranscriptWatcher;
+  codexWatcher?: CodexWatcher;
   ingest: (events: MiranteEvent[]) => void;
   /**
    * Re-reads the cached plan-usage figure and appends it when it is newer than
@@ -159,11 +161,12 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
       // Free, and catches a figure refreshed by someone opening /usage by hand.
       pollPlanUsageCache(now);
       const at = now.getTime();
-      const working = projector
-        .snapshot(at)
-        .sessions.some(
-          (lane) => !lane.endedAt && lane.cards.some((card) => livenessOf(card, at) === 'live'),
-        );
+      // Keep the Claude account meter fresh while the board has active work,
+      // including Codex sessions. Restricting this to Claude cards silently
+      // disabled the minute refresh when the person switched coding agents.
+      // The quota overlay is for display. Using it here made a 100% reading
+      // disable the very probe that could discover the account recovered.
+      const working = projector.hasLiveWork(undefined, at);
       if (!working) return 'idle';
       // Shares the button's slot, so the two never run the command at once.
       if (inFlightProbe) return 'busy';
@@ -192,7 +195,7 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
 
   // Rebuild state from the log so a restart resumes the board rather than
   // starting it empty. This is the replay guarantee, exercised on every boot.
-  projector.applyAll(log.since(0));
+  projector.applyAll(log.replay());
 
   const ingest = (events: MiranteEvent[]): void => {
     if (events.length === 0) return;
@@ -313,7 +316,9 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
   app.get('/api/events', async (request, reply) => {
     if (!guard(request, reply)) return;
     const since = Number((request.query as { since?: string }).since ?? 0);
-    return reply.send({ events: log.since(Number.isFinite(since) ? since : 0) });
+    const events = log.since(Number.isFinite(since) ? since : 0, 10_000);
+    const last = events.at(-1)?.id;
+    return reply.send({ events, hasMore: last !== undefined && last < log.lastId() });
   });
 
   app.post<{ Params: { requestId: string } }>(
@@ -413,18 +418,32 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
       })
     : undefined;
 
+  // Codex sessions, read from the files Codex writes. Same gate as the
+  // Claude Code watcher: a test must never read the developer's own sessions.
+  const codexWatcher = options.watch
+    ? new CodexWatcher({
+        sessionsDir: config.codexSessionsDir,
+        log,
+        onEvents: ingest,
+        onWarning: (message) => app.log.warn({ message }, 'codex'),
+      })
+    : undefined;
+
   return {
     app,
     log,
     projector,
     broker,
     ...(watcher ? { watcher } : {}),
+    ...(codexWatcher ? { codexWatcher } : {}),
     ingest,
     pollPlanUsageCache,
     refreshPlanUsageAutomatically,
     listen: async () => {
       watcher?.reindexFromLog();
       watcher?.start();
+      codexWatcher?.reindexFromLog();
+      codexWatcher?.start();
       if (options.pollPlanUsage && config.planUsagePollMs > 0) {
         // At start, only the free read; a process waits until work is seen.
         pollPlanUsageCache();
@@ -441,6 +460,7 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
       closed = true;
       if (pollTimer) clearInterval(pollTimer);
       watcher?.stop();
+      codexWatcher?.stop();
       broker.releaseAll();
       await app.close();
       log.close();

@@ -58,6 +58,18 @@ describe('session identity', () => {
   });
 });
 
+describe('reasoning settings recorded by Claude', () => {
+  it('reads the reported xhigh setting separately for the main agent and children', () => {
+    const settings = result.events
+      .filter((event) => event.kind === 'agent.metadata.updated')
+      .filter((event) => event.payload.effort !== null);
+    expect(settings.length).toBeGreaterThan(0);
+    expect(settings.every((event) => event.payload.effort === 'xhigh')).toBe(true);
+    expect(settings.some((event) => event.agentId === MAIN_AGENT_ID)).toBe(true);
+    expect(settings.some((event) => event.agentId !== MAIN_AGENT_ID)).toBe(true);
+  });
+});
+
 describe('handoffs', () => {
   const started = of('agent.started') as MiranteEventOf<'agent.started'>[];
 
@@ -101,6 +113,38 @@ describe('handoffs', () => {
       (e) => e.payload.toolName,
     );
     expect(toolNames).not.toContain('Agent');
+  });
+});
+
+describe('what the agents said', () => {
+  /*
+   * The recorder keeps the shape and the length of free text and replaces its
+   * content, so a fixture proves the passages are found and counted — never
+   * what was in them.
+   */
+  const said = of('agent.said') as MiranteEventOf<'agent.said'>[];
+
+  it('finds every passage of prose in the recorded session', () => {
+    const inFile = fixture.mainLines.filter((line) => {
+      const entry = line as { type?: string; message?: { content?: unknown } };
+      if (entry.type !== 'assistant' || !Array.isArray(entry.message?.content)) return false;
+      return entry.message.content.some(
+        (block) =>
+          (block as { type?: string; text?: string }).type === 'text' &&
+          ((block as { text?: string }).text ?? '').trim().length > 0,
+      );
+    }).length;
+    expect(said.length).toBeGreaterThanOrEqual(inFile);
+  });
+
+  it('attributes a subagent’s words to the subagent, not to the session', () => {
+    expect(said.some((event) => event.agentId !== MAIN_AGENT_ID)).toBe(true);
+  });
+
+  it('gives each passage a key of its own, so a re-read does not repeat it', () => {
+    const keys = said.map((event) => event.dedupeKey);
+    expect(keys.every((key) => typeof key === 'string')).toBe(true);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });
 
@@ -157,5 +201,14 @@ describe('redaction at ingest', () => {
     });
     expect(previews.length).toBeGreaterThan(0);
     expect(previews.every((p) => p.length <= DEFAULT_PREVIEW_LENGTH)).toBe(true);
+  });
+});
+
+describe('a skill loaded through the Skill tool', () => {
+  it('is reported by the call itself, which leaves no attribution behind', () => {
+    const skills = result.events
+      .filter((e): e is MiranteEventOf<'skill.invoked'> => e.kind === 'skill.invoked')
+      .map((e) => e.payload.skillName);
+    expect(skills).toContain('review');
   });
 });

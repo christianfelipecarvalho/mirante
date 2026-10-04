@@ -8,6 +8,7 @@ import { Icon, type IconName } from './Icon';
 
 const KIND_META: Record<TimelineKind, { icon: IconName; color: string }> = {
   prompt: { icon: 'prompt', color: 'var(--text-secondary)' },
+  said: { icon: 'speech', color: 'var(--text-secondary)' },
   'handoff.start': { icon: 'handoff', color: 'var(--accent)' },
   'handoff.end': { icon: 'back', color: 'var(--status-good)' },
   tool: { icon: 'dot', color: 'var(--text-muted)' },
@@ -22,7 +23,7 @@ type Group = 'all' | 'handoffs' | 'tools' | 'skills' | 'permissions' | 'errors';
 
 const GROUPS: Record<Group, TimelineKind[] | undefined> = {
   all: undefined,
-  handoffs: ['handoff.start', 'handoff.end', 'prompt'],
+  handoffs: ['handoff.start', 'handoff.end', 'prompt', 'said'],
   tools: ['tool', 'tool.failed'],
   skills: ['skill', 'compaction'],
   permissions: ['permission'],

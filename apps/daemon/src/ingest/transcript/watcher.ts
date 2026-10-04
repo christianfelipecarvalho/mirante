@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { DraftEvent, MiranteEvent } from '@mirante/shared';
+import { REREADABLE_KINDS, type DraftEvent, type MiranteEvent } from '@mirante/shared';
 import type { EventLog } from '../../core/eventlog.js';
 import { locateSessions, sessionSignature, type LocatedSession } from './locate.js';
 import { parseSessionTranscript } from './parse.js';
@@ -12,12 +12,17 @@ import { parseSessionTranscript } from './parse.js';
  * timestamp is part of it because the same kind of thing can legitimately happen
  * twice to the same card.
  */
-const signatureOf = (event: DraftEvent): string =>
-  event.dedupeKey ??
-  `${event.kind}|${event.agentId}|${event.ts}|${createHash('sha1')
-    .update(JSON.stringify(event.payload))
-    .digest('hex')
-    .slice(0, 12)}`;
+const contentHash = (event: DraftEvent): string =>
+  createHash('sha1').update(JSON.stringify(event.payload)).digest('hex').slice(0, 12);
+
+export const signatureOf = (event: DraftEvent): string =>
+  // A re-readable fact is identified by what it says, not only by which fact it
+  // is: the transcript is re-read whole, and a parser that learns to read a new
+  // field has something to add about a call already in the log. Everything else
+  // keeps its key, so an unchanged re-read appends nothing.
+  REREADABLE_KINDS.has(event.kind)
+    ? `${event.dedupeKey ?? event.kind}|${contentHash(event)}`
+    : (event.dedupeKey ?? `${event.kind}|${event.agentId}|${event.ts}|${contentHash(event)}`);
 
 export type WatcherOptions = {
   projectsDir: string;
@@ -68,7 +73,7 @@ export class TranscriptWatcher {
    * instead of re-emitting every session from the beginning.
    */
   reindexFromLog(): void {
-    for (const event of this.options.log.since(0)) {
+    for (const event of this.options.log.replay()) {
       if (event.source !== 'transcript') continue;
       this.seen(event.sessionId).add(signatureOf(event));
     }

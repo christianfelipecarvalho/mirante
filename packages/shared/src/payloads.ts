@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { spawnModeSchema } from './agent.js';
-import { entrypointSchema } from './kinds.js';
+import { effortLevelSchema } from './effort.js';
+import { entrypointSchema, harnessSchema } from './kinds.js';
 import { cardStatusSchema } from './state.js';
 import { contextUsageSchema, planUsageSchema, tokenUsageSchema } from './usage.js';
 
@@ -13,6 +14,10 @@ const previewSchema = z.string();
 export const sessionStartedPayload = z.object({
   entrypoint: entrypointSchema,
   cwd: z.string(),
+  /** Absent in logs written before Codex was observed, and there it means Claude Code. */
+  harness: harnessSchema.optional(),
+  /** The harness's own version, for whichever harness it is. */
+  harnessVersion: z.string().optional(),
   claudeVersion: z.string().optional(),
   model: z.string().optional(),
   permissionMode: z.string().optional(),
@@ -30,9 +35,37 @@ export const promptSubmittedPayload = z.object({
   charCount: z.number().int().nonnegative(),
 });
 
+/**
+ * What an agent wrote in its own words, between tool calls.
+ *
+ * The thinking that Claude Code streams to a terminal is not recoverable: it is
+ * written to the transcript with an empty `thinking` field and a signature, so
+ * this is the prose the person would have read, and nothing more. Truncated and
+ * scrubbed at ingest like every other piece of text. See docs/EVENT_MAP.md D12.
+ */
+export const agentSaidPayload = z.object({
+  text: previewSchema,
+  /** The agent wrote more than the board keeps. */
+  truncated: z.boolean().optional(),
+});
+
+export const agentMetadataUpdatedPayload = z.object({
+  model: z.string().optional(),
+  /** Null explicitly clears a setting not reported for the new turn. */
+  effort: effortLevelSchema.nullable().optional(),
+});
+
 export const agentStartedPayload = z.object({
   agentType: z.string(),
   description: z.string().optional(),
+  /**
+   * The instruction the parent wrote for this agent, truncated and scrubbed at
+   * ingest with its paragraphs kept. `description` is the headline the caller
+   * typed for the row; this is the work itself.
+   */
+  brief: previewSchema.optional(),
+  /** How long the brief was before it was cut, so the card can say what it hides. */
+  briefCharCount: z.number().int().nonnegative().optional(),
   model: z.string().optional(),
   spawnMode: spawnModeSchema,
   spawnDepth: z.number().int().nonnegative().optional(),
@@ -42,6 +75,15 @@ export const agentStartedPayload = z.object({
    * transcript exactly, so the parent-child link needs no inference.
    */
   toolUseId: z.string().optional(),
+  /**
+   * A new assignment for an agent that finished an earlier one.
+   *
+   * Codex subagents outlive their first task: they go quiet, and the parent can
+   * hand them another. Only a start that says so may reopen a finished card — a
+   * late first report of an ordinary start must not, or an agent the hook saw
+   * finish would come back to life when its transcript is read. See ADR-0008.
+   */
+  followUp: z.boolean().optional(),
 });
 
 export const agentFinishedPayload = z.object({
@@ -113,6 +155,15 @@ export const usageUpdatedPayload = z.object({
 
 export const planUsageUpdatedPayload = z.object({
   usage: planUsageSchema,
+  /**
+   * Whose plan this reading describes. Absent means Claude Code's, which is
+   * every reading written before Codex was observed. Two harnesses are two
+   * accounts with their own windows; a Codex reading must never move the Claude
+   * Code meters, or the other way round. See ADR-0008.
+   */
+  harness: harnessSchema.optional(),
+  /** The plan's own name for itself, as the harness reports it ("plus", "prolite"). */
+  planType: z.string().optional(),
 });
 
 export const contextCompactedPayload = z.object({

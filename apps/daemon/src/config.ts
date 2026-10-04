@@ -16,6 +16,13 @@ export type MiranteConfig = {
   /** Where Claude Code writes session transcripts. */
   claudeProjectsDir: string;
   /**
+   * Where OpenAI Codex writes its rollout files: `$CODEX_HOME/sessions`. Only
+   * `rollout-*.jsonl` files under it are read — never `auth.json`, which sits
+   * beside it. A missing directory means no Codex, and is not an error. See
+   * ADR-0008.
+   */
+  codexSessionsDir: string;
+  /**
    * Claude Code's own state file. Read for one key — the plan-usage figure it
    * already fetched — and for nothing else. Never a credential file. See
    * ADR-0006.
@@ -86,6 +93,9 @@ export const loadConfig = (overrides: Partial<MiranteConfig> = {}): MiranteConfi
       overrides.claudeProjectsDir ??
       process.env.CLAUDE_PROJECTS_DIR ??
       join(homedir(), '.claude', 'projects'),
+    codexSessionsDir:
+      overrides.codexSessionsDir ??
+      join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions'),
     // Where Claude Code itself looks: CLAUDE_CONFIG_DIR when set, home otherwise.
     // Hardcoding home would leave those users with "unknown" forever and no hint.
     claudeStatePath:

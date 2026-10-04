@@ -72,6 +72,11 @@ describe('the two dictionaries stay in step', () => {
             'card.tokens',
             'lane.context',
             'theme.auto',
+            // Product names, and a count with no words in it.
+            'harness.claude-code',
+            'harness.codex',
+            'entry.codex.print',
+            'project.moreSkills',
             // Role names spelled the same in both languages.
             'agentRole.dev',
             'agentRole.qa',

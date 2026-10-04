@@ -43,3 +43,24 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  package:
+    name: package (installs from a clean project)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Stage the npm package
+        run: pnpm release:build
+
+      - name: Install the tarball and run it
+        run: pnpm release:smoke

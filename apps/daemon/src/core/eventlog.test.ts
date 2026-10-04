@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MAIN_AGENT_ID, type DraftEvent } from '@mirante/shared';
+import { MAIN_AGENT_ID, type DraftEvent, type MiranteEvent } from '@mirante/shared';
 import { EventLog } from './eventlog.js';
+import { createDaemon } from '../server/index.js';
+import { loadConfig } from '../config.js';
 
 const dirs: string[] = [];
 const workspace = () => {
@@ -50,6 +52,44 @@ describe('the event log', () => {
     expect(stored?.promptId).toBe('prompt-7');
     expect(log.since(0)[0]?.promptId).toBe('prompt-7');
     log.close();
+  });
+
+  it('rebuilds current work beyond 100,000 events on restart and pages the API completely', async () => {
+    const databasePath = workspace();
+    const log = new EventLog(databasePath);
+    log.appendMany(Array.from({ length: 100_000 }, () => draft()));
+    const current = log.append(
+      draft({
+        kind: 'prompt.submitted',
+        ts: new Date().toISOString(),
+        payload: { preview: 'Current task', charCount: 12 },
+      }),
+    );
+    expect(log.since(0)).toHaveLength(100_000);
+    let last;
+    for (const item of log.replay()) last = item;
+    expect(last?.id).toBe(current.id);
+    log.close();
+
+    const token = 'd'.repeat(64);
+    const instance = createDaemon({ config: loadConfig({ databasePath }), token, watch: false });
+    try {
+      expect(instance.projector.hasLiveWork('claude-code')).toBe(true);
+      expect(instance.projector.snapshot().lastEventId).toBe(current.id);
+      const auth = { authorization: `Bearer ${token}` };
+      const first = (
+        await instance.app.inject({ method: 'GET', url: '/api/events?since=0', headers: auth })
+      ).json();
+      expect(first.events).toHaveLength(10_000);
+      expect(first.hasMore).toBe(true);
+      const tail = (
+        await instance.app.inject({ method: 'GET', url: '/api/events?since=100000', headers: auth })
+      ).json();
+      expect(tail.events.map((item: MiranteEvent) => item.id)).toEqual([current.id]);
+      expect(tail.hasMore).toBe(false);
+    } finally {
+      await instance.close();
+    }
   });
 
   it('upgrades a database written before a column existed', () => {

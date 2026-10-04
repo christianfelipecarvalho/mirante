@@ -1,6 +1,17 @@
 import type { DraftEvent, Entrypoint } from '@mirante/shared';
-import { MAIN_AGENT_ID, dedupeKeys, isInjectedMessage, stripEditorContext } from '@mirante/shared';
-import { preview, summarizeToolInput } from '../../core/redact.js';
+import {
+  MAIN_AGENT_ID,
+  dedupeKeys,
+  isInjectedMessage,
+  stripEditorContext,
+  reportedEffort,
+} from '@mirante/shared';
+import {
+  SAID_PREVIEW_LENGTH,
+  preview,
+  previewProse,
+  summarizeToolInput,
+} from '../../core/redact.js';
 import {
   agentToolResultSchema,
   subagentMetaSchema,
@@ -89,6 +100,13 @@ const isHumanPrompt = (entry: TranscriptEntry): boolean => {
     return false;
   }
   if (contentBlocks(entry).some((b) => b.type === 'tool_result')) return false;
+  // The first entry of a subagent's transcript is the brief its parent wrote,
+  // not something a person typed. It also carries the *parent turn's*
+  // `promptId`, so recording it as a prompt made it collide with the real
+  // request and with every sibling brief of the same turn — seven of eight
+  // briefs were dropped by that collision. It travels with `agent.started`
+  // instead. See docs/EVENT_MAP.md D13.
+  if (entry.isSidechain === true && !entry.parentUuid) return false;
   return !isInjectedMessage(promptText(entry));
 };
 
@@ -150,7 +168,13 @@ const isFailedResult = (entry: TranscriptEntry): boolean => {
 };
 
 /** What an `Agent` tool-use block declared, indexed by its tool-use id. */
-type SpawnInfo = { subagentType?: string; description?: string; model?: string };
+type SpawnInfo = {
+  subagentType?: string;
+  description?: string;
+  model?: string;
+  /** The instruction the parent wrote. The `Agent` result repeats it. */
+  prompt?: string;
+};
 
 type EmitContext = {
   agentId: string;
@@ -210,7 +234,12 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
           entrypoint: normalizeEntrypoint(entry.entrypoint),
           cwd: entry.cwd ?? '',
           ...(entry.version === undefined ? {} : { claudeVersion: entry.version }),
-          ...(entry.message?.model === undefined ? {} : { model: entry.message.model }),
+          // `<synthetic>` marks a message Claude Code wrote itself — a refusal at
+          // the plan limit, say. It is not a model, and a session opened by one
+          // would otherwise name it as its model.
+          ...(entry.message?.model === undefined || entry.message.model === '<synthetic>'
+            ? {}
+            : { model: entry.message.model }),
         },
       });
     }
@@ -222,6 +251,10 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     // flickers between a name and nothing while a skill is active. Tracking the
     // last *named* skill instead of the last value collapses that into one
     // timeline row per invocation rather than one per toggle.
+    // A new request starts with no skill in use. Without forgetting the last one
+    // here, a skill used again in the next turn would never be reported, and the
+    // card — which clears its skill on each prompt — would show none.
+    if (entry.type === 'user' && isHumanPrompt(entry)) lastSkill = undefined;
     const skill = entry.attributionSkill ?? undefined;
     if (skill && skill !== lastSkill) {
       events.push({
@@ -233,6 +266,17 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     }
 
     if (entry.type === 'assistant') {
+      const effort = reportedEffort(entry.effort);
+      const model = entry.message?.model;
+      const reportedModel = model && model !== '<synthetic>' ? model : undefined;
+      if (effort !== undefined || reportedModel) {
+        events.push({
+          ...base(entry),
+          kind: 'agent.metadata.updated',
+          dedupeKey: `agent.metadata.updated:${entry.sessionId}:${ctx.agentId}:${entry.uuid ?? entry.timestamp}`,
+          payload: { ...(reportedModel ? { model: reportedModel } : {}), effort: effort ?? null },
+        });
+      }
       // A refusal from the API, written by Claude Code itself: the model never
       // ran, the usage is all zeros, and the only content is the reason.
       if (entry.isApiErrorMessage === true) {
@@ -276,11 +320,48 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
         });
       }
 
+      /*
+       * What the agent wrote, in the order a person would have read it: the
+       * prose comes before the tool call it announces.
+       *
+       * The thinking Claude Code streams to the terminal is not here to be
+       * read — it reaches the transcript with an empty `thinking` field and a
+       * signature only. See docs/EVENT_MAP.md D12.
+       */
+      contentBlocks(entry).forEach((block, index) => {
+        if (block.type !== 'text' || typeof block.text !== 'string') return;
+        const said = preview(block.text, SAID_PREVIEW_LENGTH);
+        if (!said) return;
+        events.push({
+          ...base(entry),
+          kind: 'agent.said',
+          ...(entry.uuid === undefined
+            ? {}
+            : { dedupeKey: dedupeKeys.saidInMessage(entry.uuid, index) }),
+          payload: {
+            text: said,
+            ...(block.text.trim().length > SAID_PREVIEW_LENGTH ? { truncated: true } : {}),
+          },
+        });
+      });
+
       for (const block of toolUseBlocks(entry)) {
         ctx.toolNameById.set(block.id, block.name);
         // An `Agent` call is a handoff, not a tool row. It becomes `agent.started`
         // once the result carries the agent id.
         if (block.name === 'Agent') continue;
+        // A skill loaded through the `Skill` tool leaves no `attributionSkill`
+        // on the entries that follow — observed on 2.1.27x — so the call itself
+        // is the report. `lastSkill` keeps a later attribution of the same
+        // skill from reporting it twice. See docs/EVENT_MAP.md D4.
+        const skillName =
+          block.name === 'Skill' && typeof block.input === 'object' && block.input !== null
+            ? (block.input as Record<string, unknown>).skill
+            : undefined;
+        if (typeof skillName === 'string' && skillName.length > 0 && skillName !== lastSkill) {
+          events.push({ ...base(entry), kind: 'skill.invoked', payload: { skillName } });
+          lastSkill = skillName;
+        }
         events.push({
           ...base(entry),
           kind: 'tool.started',
@@ -330,6 +411,9 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
       // covers agents whose transcript was not read, or was not written yet.
       const agentType = ctx.agentTypeByAgentId.get(r.agentId) ?? spawn?.subagentType ?? 'unknown';
       const description = r.description ?? spawn?.description;
+      // Recorded in both places; either will do, and the longer one is the one
+      // that was not already cut by whatever wrote it.
+      const brief = r.prompt ?? spawn?.prompt;
       events.push({
         ...base(entry),
         agentId: r.agentId,
@@ -341,6 +425,9 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
         payload: {
           agentType,
           ...(description === undefined ? {} : { description: preview(description) }),
+          ...(brief === undefined || brief.trim() === ''
+            ? {}
+            : { brief: previewProse(brief), briefCharCount: brief.trim().length }),
           ...((r.resolvedModel ?? spawn?.model) ? { model: r.resolvedModel ?? spawn?.model } : {}),
           spawnMode: r.isAsync === true || r.status === 'async_launched' ? 'async' : 'sync',
           ...(toolUseId === undefined ? {} : { toolUseId }),
@@ -413,6 +500,7 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
         ...(typeof input.subagent_type === 'string' ? { subagentType: input.subagent_type } : {}),
         ...(typeof input.description === 'string' ? { description: input.description } : {}),
         ...(typeof input.model === 'string' ? { model: input.model } : {}),
+        ...(typeof input.prompt === 'string' ? { prompt: input.prompt } : {}),
       });
     }
   };

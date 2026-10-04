@@ -8,7 +8,7 @@ import { useNow } from '../lib/now';
 import { DisplaySettings } from './DisplaySettings';
 import { Icon, type IconName } from './Icon';
 import { Logo } from './Logo';
-import { PlanMeters } from './PlanMeters';
+import { HarnessPlanMeters, PlanMeters } from './PlanMeters';
 
 const CONNECTION_META: Record<Connection, { key: string; color: string; icon: IconName }> = {
   connecting: { key: 'conn.connecting', color: 'var(--text-muted)', icon: 'circle' },
@@ -89,7 +89,16 @@ export const TopBar = ({
         </div>
 
         <div className="topbar-cell topbar-limits min-w-0" style={{ gridArea: 'limits' }}>
-          <PlanMeters board={board} now={now} onRefresh={onRefreshPlanUsage} />
+          {/* One block per account. Claude Code's first: it is the one that can
+              be read on demand. */}
+          <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+            <PlanMeters board={board} now={now} onRefresh={onRefreshPlanUsage} />
+            {board.harnessPlans?.codex && (
+              <div className="border-l pl-6" style={{ borderColor: 'var(--hairline)' }}>
+                <HarnessPlanMeters harness="codex" plan={board.harnessPlans.codex} now={now} />
+              </div>
+            )}
+          </div>
         </div>
 
         <div

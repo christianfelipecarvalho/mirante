@@ -45,6 +45,12 @@
   --agent-7: #9085e9;
   --agent-8: #e66767;
   --agent-neutral: #898781;
+
+  /* The hot centre of a travelling light: brighter than the hue it carries,
+     the way a filament is brighter than the glass around it. */
+  --glow-core: color-mix(in oklab, #ffffff 40%, var(--glow, var(--accent)));
+  /* What a card sinks toward when nothing is happening in it. */
+  --card-off: var(--plane);
 }
 
 :root[data-theme='light'] {
@@ -75,6 +81,17 @@
   --agent-7: #4a3aa7;
   --agent-8: #e34948;
   --agent-neutral: #898781;
+
+  /* On a pale surface light reads as saturation, not as whiteness. */
+  --glow-core: color-mix(in oklab, #000000 12%, var(--glow, var(--accent)));
+  /*
+   * Light keeps its full surface at rest. There is nowhere to sink to — the
+   * plane is a shade lighter than the cards on it — and the greys these cards
+   * use for their smallest text already sit at 3.5:1 here, so a darker card
+   * would spend contrast that is not there to spend. A resting card in light
+   * says so through its quiet rail, its quiet mark and the absence of a glow.
+   */
+  --card-off: var(--card-surface);
 }
 
 html,
@@ -324,43 +341,332 @@ body {
 }
 
 /*
- * Working, right now. A thin bar sweeping along the top of a card whose agent
- * has actually been heard from recently — never on a card that merely claims
- * to be running (see lib/liveness). The bar takes the agent's own colour, so a
- * lane of busy agents reads as several channels active, not as one alarm.
+ * Cards are windows seen from the lookout.
+ *
+ * One rule decides the whole treatment: light means work. A card whose agent
+ * has actually been heard from recently is lit — its frame carries a travelling
+ * beam in the agent's own colour, so six busy agents read as six lit windows
+ * rather than one alarm. A card at rest sinks toward the plane behind it.
+ * Nothing here carries meaning alone: the state badge, its icon and its word
+ * say the same thing in text.
+ *
+ * `--glow` is the agent's colour, set by the component. `--card-surface` is the
+ * surface this card would have if nothing were happening.
  */
-.card-loading {
-  position: absolute;
-  inset-inline: 0;
-  inset-block-start: 0;
-  /* The same weight as the agent rail down the left edge, so the two read as
-     one frame around a card that is working. */
-  block-size: 3px;
-  overflow: hidden;
-  background: color-mix(in oklab, var(--bar) 16%, transparent);
+@property --spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
 }
-.card-loading::after {
+
+.glow-card {
+  --card-surface: var(--surface-1);
+  /* Keeps the light layers between the card's own background and its content,
+     rather than letting them fall behind whatever is underneath. */
+  isolation: isolate;
+  background: var(--card-surface);
+  border-color: var(--hairline);
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease,
+    box-shadow 260ms ease;
+}
+
+/*
+ * At rest the window is dark: the card sinks toward the plane behind it, its
+ * rail and mark go quiet, and it comes back under the pointer so reading a
+ * quiet card never costs a click.
+ *
+ * What dims is the box, never the words. Fading the whole card took its
+ * smallest grey text from 4.8:1 to 4.3:1, under the floor this repo holds; a
+ * darker surface under unchanged text reads as "off" and lands at 5.2:1.
+ */
+.glow-card[data-life='rest'] {
+  background: color-mix(in oklab, var(--card-surface) 50%, var(--card-off));
+}
+.glow-card[data-life='rest']:hover,
+.glow-card[data-life='rest']:focus-within {
+  background: var(--card-surface);
+}
+.card-mark {
+  transition:
+    opacity 220ms ease,
+    filter 220ms ease;
+}
+.glow-card[data-life='rest'] .card-mark {
+  opacity: 0.62;
+  filter: saturate(0.6);
+}
+.glow-card:hover .card-mark,
+.glow-card:focus-within .card-mark {
+  opacity: 1;
+  filter: none;
+}
+
+/* Blocked on a person: the edge says so before anything else is read. */
+.glow-card[data-life='waiting'] {
+  border-color: color-mix(in oklab, var(--status-warning) 45%, var(--hairline));
+}
+/* Under the pointer the edge takes the card's own light, so hover answers with
+   the agent's colour rather than a house blue. */
+.glow-card:hover,
+.glow-card:focus-within {
+  border-color: color-mix(in oklab, var(--glow) 45%, var(--hairline));
+}
+/* Press feedback, still through colour and never through transform. */
+.glow-card:active {
+  background-color: color-mix(in oklab, var(--glow) 14%, var(--card-surface));
+}
+
+.card-rail {
+  transition: opacity 220ms ease;
+}
+.glow-card[data-life='rest'] .card-rail {
+  opacity: 0.5;
+}
+.glow-card:hover .card-rail {
+  opacity: 1;
+}
+
+/* Lit: a steady bloom in the agent's colour, the halo of a window at night. */
+.glow-card[data-life='working'] {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--glow) 16%, transparent),
+    0 0 26px -6px color-mix(in oklab, var(--glow) 40%, transparent),
+    0 18px 52px -26px color-mix(in oklab, var(--glow) 85%, transparent);
+}
+
+/* A lane holds cards that glow on their own, so it only says "something here is
+   working" — a bloom with no lit edge, one step back from its contents. */
+.glow-card.glow-quiet[data-life='working'] {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--glow) 10%, transparent),
+    0 22px 64px -34px color-mix(in oklab, var(--glow) 70%, transparent);
+}
+
+/* Small project controls share the agents' live light, with a compact halo. */
+.project-chip[data-life='working'] {
+  box-shadow: inset 0 0 12px -5px color-mix(in oklab, var(--glow) 55%, transparent);
+}
+
+/*
+ * The beam: one pass of light around the frame, over and over, while the agent
+ * works. It replaces the bar that used to sweep the top edge — same claim, made
+ * by the whole card, and one moving thing per card instead of two.
+ */
+.glow-card[data-beam='true']::before {
   content: '';
   position: absolute;
-  inset-block: 0;
-  inline-size: 35%;
-  background: linear-gradient(90deg, transparent, var(--bar), transparent);
-  animation: mirante-loading 1.4s ease-in-out infinite;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 2px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--spin),
+    transparent 0deg,
+    color-mix(in oklab, var(--glow) 22%, transparent) 28deg,
+    var(--glow) 55deg,
+    var(--glow-core) 72deg,
+    var(--glow) 90deg,
+    color-mix(in oklab, var(--glow) 22%, transparent) 118deg,
+    transparent 146deg,
+    transparent 360deg
+  );
+  /* Keeps only the outermost pixel: a lit frame, not a lit card. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: mirante-orbit 4s linear infinite;
 }
-@keyframes mirante-loading {
-  from {
-    transform: translateX(-100%);
-  }
+@keyframes mirante-orbit {
   to {
-    transform: translateX(290%);
+    --spin: 360deg;
   }
 }
-/* Without motion, still say "active": a solid bar instead of a sweep. */
+
+/*
+ * The lantern: light follows the pointer across the card. It answers a person's
+ * movement — it never plays on its own — and it is the same light as the beam,
+ * so hovering a working card reads as leaning toward the window it already lit.
+ */
+.lantern::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Above the card's own background, below its text. */
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  background: radial-gradient(
+    220px circle at var(--px, 50%) var(--py, 0%),
+    color-mix(in oklab, var(--glow) 26%, transparent),
+    transparent 72%
+  );
+}
+.lantern:hover::after,
+.lantern:focus-within::after {
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .card-loading::after {
-    animation: none;
-    inline-size: 100%;
-    background: var(--bar);
-    opacity: 0.6;
+  /* Still say "working", without the travelling light: an evenly lit frame. */
+  .glow-card[data-beam='true']::before {
+    background: color-mix(in oklab, var(--glow) 65%, transparent);
+  }
+}
+
+/*
+ * A control shown on hover is hidden on a screen that has no hover. There it
+ * is simply always shown.
+ */
+@media (hover: none) {
+  .hover-reveal {
+    opacity: 1;
+  }
+}
+
+/*
+ * Agent topology.
+ *
+ * The thin track is the lasting relationship; the brighter dash is the live
+ * signal travelling in the direction of work. Returning swaps the path's
+ * direction in React, so the same animation visibly comes back to the caller.
+ */
+.agent-flow-shell {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 180px;
+  max-height: min(68vh, 760px);
+  background-color: var(--surface-1);
+  background-image:
+    linear-gradient(var(--gridline) 1px, transparent 1px),
+    linear-gradient(90deg, var(--gridline) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.agent-flow-shell[data-compact='true'] {
+  max-height: min(48vh, 420px);
+}
+
+.agent-flow-shell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.agent-flow-edge-track,
+.agent-flow-edge-signal {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.agent-flow-edge-track {
+  stroke: color-mix(in oklab, var(--edge-color) 26%, var(--baseline));
+  stroke-width: 2;
+}
+
+.agent-flow-edge-signal {
+  stroke: var(--edge-color);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 5 12;
+  animation: mirante-flow-signal 900ms linear infinite;
+}
+
+.agent-flow-edge[data-state='waiting'] .agent-flow-edge-signal {
+  stroke: var(--status-warning);
+}
+
+.agent-flow-edge[data-moving='false'] .agent-flow-edge-signal {
+  animation: none;
+  stroke-dasharray: 3 6;
+}
+
+.agent-flow-edge[data-state='returning'] .agent-flow-edge-signal {
+  stroke: var(--status-good);
+  stroke-width: 3;
+  animation-duration: 600ms;
+}
+
+.agent-flow-edge[data-state='closed'] .agent-flow-edge-track,
+.agent-flow-edge[data-state='idle'] .agent-flow-edge-track,
+.agent-flow-edge[data-state='silent'] .agent-flow-edge-track {
+  stroke: var(--text-muted);
+  stroke-dasharray: 3 6;
+  opacity: 0.45;
+}
+
+.agent-flow-edge[data-state='closed'] .agent-flow-edge-signal,
+.agent-flow-edge[data-state='idle'] .agent-flow-edge-signal,
+.agent-flow-edge[data-state='silent'] .agent-flow-edge-signal {
+  display: none;
+}
+
+.agent-flow-edge-label-bg {
+  fill: var(--surface-1);
+  stroke: var(--hairline);
+}
+
+.agent-flow-edge-label {
+  fill: var(--text-muted);
+  font-size: 9px;
+}
+
+@keyframes mirante-flow-signal {
+  to {
+    stroke-dashoffset: -17;
+  }
+}
+
+.agent-flow-node {
+  cursor: pointer;
+  z-index: 1;
+  border-color: color-mix(in oklab, var(--node-color) 34%, var(--hairline));
+  background: color-mix(in oklab, var(--surface-2) 94%, var(--node-color));
+  color: var(--text-primary);
+  box-shadow: 0 8px 28px -22px var(--node-color);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.agent-flow-node:hover,
+.agent-flow-node:focus-visible {
+  border-color: var(--node-color);
+  box-shadow: 0 10px 32px -16px var(--node-color);
+}
+
+.agent-flow-node:focus-visible {
+  outline: 2px solid var(--node-color);
+  outline-offset: 2px;
+}
+
+.agent-flow-node[data-life='working'] {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--node-color) 18%, transparent),
+    0 10px 34px -15px color-mix(in oklab, var(--node-color) 72%, transparent);
+}
+
+.agent-flow-node[data-life='waiting'] {
+  border-color: color-mix(in oklab, var(--status-warning) 60%, var(--hairline));
+}
+
+.agent-flow-node[data-life='closed'],
+.agent-flow-node[data-life='silent'] {
+  filter: saturate(0.55);
+  opacity: 0.72;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-flow-edge-signal {
+    stroke-dasharray: none;
   }
 }

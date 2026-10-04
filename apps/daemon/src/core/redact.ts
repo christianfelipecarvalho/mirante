@@ -28,6 +28,43 @@ export const scrubSecrets = (value: string): string =>
  */
 export const DEFAULT_PREVIEW_LENGTH = 160;
 
+/**
+ * What an agent writes is meant to be read, not glanced at, so it keeps more
+ * than a tool summary does — about a short paragraph. Still bounded: the log is
+ * append-only, and a stored string is a stored risk however local it is.
+ */
+export const SAID_PREVIEW_LENGTH = 400;
+
+/**
+ * The instruction one agent writes for another: the longest text on the board
+ * worth keeping, and the only one whose internal structure carries meaning.
+ *
+ * Measured against real sessions, briefs run from 3,000 to 5,000 characters. A
+ * screenful is kept here; the rest is not lost quietly — the count of what was
+ * written travels with it, so a card can say how much it is not showing.
+ */
+export const BRIEF_PREVIEW_LENGTH = 700;
+
+/**
+ * A preview of written text, with its paragraphs intact.
+ *
+ * `preview` flattens everything to one line, which is right for a command and
+ * wrong for an instruction: a numbered list arrives as a run-on sentence. This
+ * keeps one blank line between paragraphs and the leading marker of a list
+ * item, and collapses everything else. Scrubbing is identical.
+ */
+export const previewProse = (value: unknown, max = BRIEF_PREVIEW_LENGTH): string => {
+  if (typeof value !== 'string') return '';
+  const scrubbed = scrubSecrets(value)
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .trim();
+  return scrubbed.length <= max ? scrubbed : `${scrubbed.slice(0, max - 1)}…`;
+};
+
 export const preview = (value: unknown, max = DEFAULT_PREVIEW_LENGTH): string => {
   if (typeof value !== 'string') return '';
   const scrubbed = scrubSecrets(value).replace(/\s+/g, ' ').trim();

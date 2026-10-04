@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { PLAN_READING_MAX_AGE_MS, type BoardState } from '@mirante/shared';
+import type { BoardState, Harness, HarnessPlan } from '@mirante/shared';
 import type { PlanUsageRefresh } from '../lib/client';
 import { useI18n } from '../lib/i18n';
-import { readWindow } from '../lib/plan';
+import { readWindow, readingAge } from '../lib/plan';
 import { Icon } from './Icon';
 import { Meter } from './Meter';
 
@@ -42,27 +42,26 @@ export const PlanMeters = ({
 
   const readAt = board.planUsageUpdatedAt ? Date.parse(board.planUsageUpdatedAt) : undefined;
   const known = readAt !== undefined && Number.isFinite(readAt);
-  const minutes = known ? Math.max(0, Math.round((now - readAt) / 60_000)) : 0;
   // Past an hour the figure is older than Claude Code itself trusts; the icon
   // changes shape as well as the colour, so the warning survives greyscale.
-  const old = known && now - readAt > PLAN_READING_MAX_AGE_MS;
-  const age = !known
-    ? t('plan.noReading')
-    : minutes < 1
-      ? t('plan.ago.justNow')
-      : minutes <= 5
-        ? t('plan.ago.minutes', { n: minutes })
-        : t('plan.lastUsed', {
-            d: minutes < 60 ? `${minutes}min` : `${Math.round(minutes / 60)}h`,
-          });
+  const { text: age, old } = readingAge(readAt, now, t);
 
   const title = known
     ? t('plan.refreshTitleAt', { time: new Date(readAt).toLocaleString() })
     : t('plan.refreshTitle');
 
   return (
-    <section aria-label={t('plan.limits')} className="flex items-start gap-5">
+    <section
+      aria-label={`${t('plan.limits')}: ${t('harness.claude-code')}`}
+      className="flex max-w-full min-w-0 flex-wrap items-start gap-x-5 gap-y-2"
+    >
       <div className="flex w-[118px] shrink-0 flex-col items-start gap-1">
+        {/* Whose plan. With Codex on the same board, unlabelled meters would
+            read as covering both, and Codex's usage is not read at all. */}
+        <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--text-secondary)]">
+          <Icon name="harness" size={11} />
+          {t('harness.claude-code')}
+        </span>
         <button
           type="button"
           onClick={read}
@@ -107,6 +106,61 @@ export const PlanMeters = ({
       <Meter label={t('plan.weekly.short')} reading={readWindow(board.planUsage?.sevenDay, now)} />
       {board.planUsage?.spendLimit && (
         <Meter label={t('plan.spend')} reading={readWindow(board.planUsage.spendLimit, now)} />
+      )}
+    </section>
+  );
+};
+
+/**
+ * Another harness's plan, beside Claude Code's.
+ *
+ * Read from that harness's own session files, which it writes each time it
+ * answers. There is no button: Mirante has no way to ask for a fresh figure
+ * without the network, so the age line says how old the one it has is. Only
+ * the windows the plan has are drawn — a plan with a weekly window alone gets
+ * one meter, not a second one reading "unknown" for a window it never had.
+ */
+export const HarnessPlanMeters = ({
+  harness,
+  plan,
+  now,
+}: {
+  harness: Exclude<Harness, 'claude-code'>;
+  plan: HarnessPlan;
+  now: number;
+}) => {
+  const { t } = useI18n();
+  const { text: age, old } = readingAge(Date.parse(plan.updatedAt), now, t);
+  const name = t(`harness.${harness}`);
+  return (
+    <section
+      aria-label={`${t('plan.limits')}: ${name}`}
+      className="flex max-w-full min-w-0 flex-wrap items-start gap-x-5 gap-y-2"
+      title={t('plan.harnessTitle', { h: name })}
+    >
+      <div className="flex w-[118px] shrink-0 flex-col items-start gap-1">
+        <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--text-secondary)]">
+          <Icon name="harness" size={11} />
+          {name}
+        </span>
+        {plan.planType && (
+          <span className="text-[11px] text-[var(--text-primary)]">
+            {t('plan.planType', { p: plan.planType })}
+          </span>
+        )}
+        <span
+          className="flex items-center gap-1 text-[10px] whitespace-nowrap"
+          style={{ color: old ? 'var(--text-secondary)' : 'var(--text-muted)' }}
+        >
+          {old && <Icon name="clock" size={11} />}
+          {age}
+        </span>
+      </div>
+      {plan.usage.fiveHour && (
+        <Meter label={t('plan.fiveHour.short')} reading={readWindow(plan.usage.fiveHour, now)} />
+      )}
+      {plan.usage.sevenDay && (
+        <Meter label={t('plan.weekly.short')} reading={readWindow(plan.usage.sevenDay, now)} />
       )}
     </section>
   );

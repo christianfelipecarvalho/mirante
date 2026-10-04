@@ -52,6 +52,52 @@ Commands are rejected for sessions that the driver does not own. **A driven comm
 
 This is not a bug to be fixed; it is a property of the surfaces. The UI must render plan usage as "unavailable for this session" rather than zero, and the reason must be discoverable in the interface, not only in the docs. This asymmetry is the strongest single argument for observer-first and is recorded in [ADR-0001](adr/0001-observer-before-driver.md).
 
+## What an agent says
+
+`agent.said` carries the prose an agent writes between its tool calls. The
+observer reads it from the `text` blocks of assistant entries; a driven session
+gets it from the SDK's assistant messages, which stream the same text. Both
+adapters can emit it, which is what makes it a legal kind under the invariant
+above.
+
+Thinking is not a kind and must not become one from the driver's side alone.
+Streamed reasoning would be available to a driven session and is provably
+unavailable to the observer — Claude Code writes the `thinking` block empty
+(EVENT_MAP D12) — so a UI showing it would be showing something only one adapter
+can produce.
+
+## Preventive budget handoff
+
+The observer advises a checkpoint at 80% usage and a pause at 90%, based on
+the tightest known account window for each harness. These are policy margins,
+not a prediction that the current assignment will fit. A reading older than
+five minutes, an absent reading, or a window that already reset cannot establish
+remaining allowance. Plan percentages are not a paid credit balance. Children
+share the account allowance; their percentages must never be added together.
+
+The panel exports the observed assignments, states, latest activity and pending
+approvals as a local recovery snapshot. It also supplies an instruction to paste
+into the coordinator's session: collect progress from active children, save
+completed work, changed files, test results, remaining tasks and next steps, then
+ask whether to continue and wait for an explicit answer. The snapshot cannot
+establish unreported task completion or stop execution. No automatic interrupt
+or guaranteed credit reserve exists in observer mode.
+
+For a future driver, budget control must be account-wide and include all active
+children. Stop new assignments first, request and persist the handoff while a
+conservative reserve remains, then pause owned turns and verify acknowledgements.
+Continuing requires an explicit user decision; elapsed time is never consent.
+If handoff generation fails, retain the last factual snapshot and mark missing
+results as unknown. A pending long tool call can still consume resources.
+
+For Codex, the [official App Server interface](https://learn.chatgpt.com/docs/app-server)
+provides `account/rateLimits/read`, usage notifications, `turn/steer` and
+`turn/interrupt`. Credit details depend on what the service returns. These
+interfaces are a route for a future owned-session adapter; they are not enabled
+by reading rollout files and must not be injected into unrelated terminal
+sessions. Any network-backed driver requires an explicit change to the current
+local-only architecture.
+
 ## Open questions
 
 - Whether hooks can be registered on an SDK session, which would let a single ingest path serve both adapters.

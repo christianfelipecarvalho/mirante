@@ -147,3 +147,6 @@ vite.config.ts.timestamp-*
 *.db
 *.db-journal
 *.db-wal
+
+# npm package staged by scripts/build-release.mjs
+/release/

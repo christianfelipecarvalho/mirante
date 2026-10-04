@@ -1,0 +1,30 @@
+{
+  "name": "codex-legacy",
+  "recordedAt": "2026-09-30T02:18:25.859Z",
+  "harness": "codex",
+  "cliVersion": "0.155.0-alpha.16.3",
+  "files": [
+    {
+      "file": "root.jsonl",
+      "kept": 301,
+      "of": 6713
+    },
+    {
+      "file": "subagent-1.jsonl",
+      "kept": 327,
+      "of": 2138
+    },
+    {
+      "file": "subagent-2.jsonl",
+      "kept": 142,
+      "of": 1243
+    },
+    {
+      "file": "subagent-3.jsonl",
+      "kept": 329,
+      "of": 1621
+    }
+  ],
+  "recorderHash": "c3493b638588",
+  "redaction": "Record types, ids, turn and call ids, timestamps, tool names, agent roles and token counts kept. Messages, commands, outputs, paths, task and skill names replaced; reasoning dropped. Review by hand before committing."
+}

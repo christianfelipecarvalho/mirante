@@ -80,6 +80,8 @@ export const transcriptEntrySchema = z
     gitBranch: z.string().optional(),
     version: z.string().optional(),
     entrypoint: z.string().optional(),
+    /** Observed on assistant entries: xhigh/max, independently of the model. */
+    effort: z.unknown().optional(),
     promptId: z.string().optional(),
     isMeta: z.boolean().optional(),
     isSidechain: z.boolean().optional(),
@@ -136,5 +138,11 @@ export const agentToolResultSchema = z
     resolvedModel: z.string().optional(),
     description: z.string().optional(),
     outputFile: z.string().optional(),
+    /**
+     * The instruction the parent wrote. Recorded here as well as in the
+     * `Agent` tool-use input, and again as the subagent's own first entry.
+     * See docs/EVENT_MAP.md D13.
+     */
+    prompt: z.string().optional(),
   })
   .passthrough();

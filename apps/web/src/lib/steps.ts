@@ -16,7 +16,7 @@ import {
  * duration, which is what this builds.
  */
 export type StepKind =
-  'prompt' | 'tool' | 'agent' | 'skill' | 'permission' | 'compaction' | 'error';
+  'prompt' | 'said' | 'tool' | 'agent' | 'skill' | 'permission' | 'compaction' | 'error';
 
 /**
  * `limited` is a stop the plan imposed, not a failure: painted in the serious
@@ -137,6 +137,18 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
           kind: 'prompt',
           title: 'prompt',
           detail: event.payload.preview,
+          status: 'info',
+        });
+        break;
+
+      // The agent's own words, between its tool calls — the line the terminal
+      // shows and the board used to drop.
+      case 'agent.said':
+        steps.push({
+          ...base(event),
+          kind: 'said',
+          title: 'said',
+          detail: event.payload.text,
           status: 'info',
         });
         break;

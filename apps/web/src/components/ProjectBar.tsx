@@ -1,19 +1,10 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { ProjectActivity, ProjectGroup } from '../lib/projects';
 import { useI18n } from '../lib/i18n';
-import { Icon, type IconName } from './Icon';
-
-/**
- * Each state gets its own shape, not just its own colour, so the row still reads
- * in greyscale and for a colourblind reader.
- */
-const MARK: Record<ProjectActivity, { icon: IconName; color: string }> = {
-  needs_you: { icon: 'alert', color: 'var(--status-warning)' },
-  working: { icon: 'play', color: 'var(--accent)' },
-  blocked: { icon: 'pause', color: 'var(--status-serious)' },
-  idle: { icon: 'dot', color: 'var(--text-muted)' },
-  finished: { icon: 'check', color: 'var(--text-muted)' },
-};
+import { PROJECT_MARK as MARK } from '../lib/project-state';
+import { summarizeProject } from '../lib/project-summary';
+import { waitingText } from './AgentCard';
+import { Icon } from './Icon';
 
 export type ProjectBarProps = {
   groups: ProjectGroup[];
@@ -40,7 +31,6 @@ export const ProjectBar = ({
   const rail = useRef<HTMLDivElement>(null);
   const overflowing = useOverflow(rail);
   const ordered = useFrozenWhileHeld(groups, rail);
-  const liveSessions = groups.reduce((sum, group) => sum + group.liveSessions, 0);
 
   return (
     <div className="flex items-center gap-2" role="group" aria-label={t('filter.project')}>
@@ -53,21 +43,28 @@ export const ProjectBar = ({
       >
         <Chip
           label={t('project.allSessions')}
-          count={liveSessions}
           selected={selected === 'all'}
           onClick={() => onSelect('all')}
         />
-        {ordered.map((group) => (
-          <Chip
-            key={group.key}
-            label={group.name}
-            count={group.liveSessions}
-            awaiting={group.awaiting}
-            activity={group.activity}
-            selected={selected === group.key}
-            onClick={() => onSelect(group.key)}
-          />
-        ))}
+        {ordered.map((group) => {
+          // What is awaited, in the tooltip: the chip says how many, the card
+          // below says what, and a hover should not have to open the card.
+          const awaited =
+            group.activity === 'needs_you'
+              ? summarizeProject(group.lanes, Date.now()).awaited
+              : undefined;
+          return (
+            <Chip
+              key={group.key}
+              label={group.name}
+              awaiting={group.awaiting}
+              activity={group.activity}
+              {...(awaited ? { detail: waitingText(awaited.waitingOn, t) } : {})}
+              selected={selected === group.key}
+              onClick={() => onSelect(group.key)}
+            />
+          );
+        })}
       </div>
 
       {archivedCount > 0 && (
@@ -92,19 +89,16 @@ export const ProjectBar = ({
 
 type ChipProps = {
   label: string;
-  count: number;
   awaiting?: number;
+  /** What the project waits on, for the tooltip. */
+  detail?: string;
   activity?: ProjectActivity;
   selected: boolean;
   onClick: () => void;
 };
 
-/**
- * Motion is spent in one place only. Every project that is merely running would
- * make the whole row twitch; only the one waiting on a decision earns the eye.
- * `prefers-reduced-motion` is honoured globally in index.css.
- */
-const Chip = ({ label, count, awaiting = 0, activity, selected, onClick }: ChipProps) => {
+/** Working projects retain a lit frame even while another filter is selected. */
+const Chip = ({ label, awaiting = 0, detail, activity, selected, onClick }: ChipProps) => {
   const { t } = useI18n();
   const mark = activity ? MARK[activity] : undefined;
   const state = activity ? t(`project.state.${activity}` as 'project.state.idle') : undefined;
@@ -123,17 +117,22 @@ const Chip = ({ label, count, awaiting = 0, activity, selected, onClick }: ChipP
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      title={state ? `${label} — ${state}` : label}
-      className={`pressable flex shrink-0 cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px] whitespace-nowrap ${
+      data-life={activity === 'working' ? 'working' : activity === 'needs_you' ? 'waiting' : 'rest'}
+      data-beam={activity === 'working'}
+      title={[label, state, detail].filter(Boolean).join(' — ')}
+      className={`project-chip glow-card pressable relative flex shrink-0 cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px] whitespace-nowrap ${
         activity === 'needs_you' ? 'calling' : ''
       }`}
-      style={{
-        // Selection is carried by the fill and the border together, so it does
-        // not rest on a hue alone.
-        background: selected ? 'var(--surface-1)' : 'transparent',
-        borderColor: selected ? 'var(--accent)' : 'var(--hairline)',
-        color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
-      }}
+      style={
+        {
+          // Selection is carried by the fill and the border together, so it does
+          // not rest on a hue alone.
+          background: selected ? 'var(--surface-1)' : 'transparent',
+          borderColor: selected ? 'var(--accent)' : 'var(--hairline)',
+          color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
+          '--glow': mark?.color ?? 'var(--accent)',
+        } as CSSProperties
+      }
     >
       {mark && (
         <span style={{ color: mark.color }} aria-hidden="true">
@@ -141,16 +140,12 @@ const Chip = ({ label, count, awaiting = 0, activity, selected, onClick }: ChipP
         </span>
       )}
       <span className="max-w-[18ch] overflow-hidden text-ellipsis">{label}</span>
-      {spoken ? (
+      {/* A bare number beside a name said nothing about what it counted; the
+          cards below carry the counts, with their words. */}
+      {spoken && (
         <span className="text-[11px] font-medium" style={{ color: mark?.color }}>
           {spoken}
         </span>
-      ) : (
-        count > 0 && (
-          <span className="tabular text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            {count}
-          </span>
-        )
       )}
       {state && !spoken && <span className="sr-only">{state}</span>}
     </button>
