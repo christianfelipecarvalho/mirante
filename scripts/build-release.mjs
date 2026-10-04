@@ -87,7 +87,10 @@ const manifest = {
   repository: cli.repository,
   bugs: cli.bugs,
   type: 'module',
-  bin: cli.bin,
+  // npm rewrites `./dist/bin.js` to `dist/bin.js` on publish and warns about it.
+  bin: Object.fromEntries(
+    Object.entries(cli.bin).map(([name, path]) => [name, path.replace(/^\.\//, '')]),
+  ),
   files: cli.files,
   engines: cli.engines,
   dependencies: Object.fromEntries(
