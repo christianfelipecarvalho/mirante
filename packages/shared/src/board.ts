@@ -1,7 +1,16 @@
 import type { SpawnMode } from './agent.js';
-import type { Entrypoint } from './kinds.js';
+import type { EffortLevel } from './effort.js';
+import type { Entrypoint, Harness } from './kinds.js';
 import type { CardStatus } from './state.js';
 import type { ContextUsage, PlanUsage, TokenUsage } from './usage.js';
+
+/** The plan limits of one harness other than Claude Code, and when they were read. */
+export type HarnessPlan = {
+  usage: PlanUsage;
+  /** ISO 8601. When the harness wrote the reading. */
+  updatedAt: string;
+  planType?: string;
+};
 
 /** What a tool call looks like while it is still running. */
 export type RunningTool = {
@@ -25,6 +34,16 @@ export type AgentCard = {
    * kept separately from activity, which the first tool call would overwrite.
    */
   task?: string;
+  /**
+   * The instruction this agent was given, as far as the board kept it.
+   *
+   * The task is a headline a caller typed; this is what was actually asked. It
+   * is the most literal answer the board has to "what is this agent doing",
+   * which is the question the product exists to answer.
+   */
+  brief?: string;
+  /** The brief's length before truncation, when it was cut. */
+  briefCharCount?: number;
   parentAgentId?: string;
   status: CardStatus;
   /** The single line under the card title: what this agent is doing right now. */
@@ -41,10 +60,11 @@ export type AgentCard = {
    * agent did. The interface quotes it and says "your last message"; building
    * a "Prompt: …" string here would fix it in one language.
    */
-  lastActivityKind?: 'prompt';
+  lastActivityKind?: 'prompt' | 'said';
   currentTool?: RunningTool;
   activeSkill?: string;
   model?: string;
+  effort?: EffortLevel;
   spawnMode?: SpawnMode;
   tokens: TokenUsage;
   startedAt: string;
@@ -81,6 +101,9 @@ export type SessionLane = {
   projectName: string;
   gitBranch?: string;
   entrypoint: Entrypoint;
+  /** Which coding agent runs it. Claude Code unless a session said otherwise. */
+  harness: Harness;
+  harnessVersion?: string;
   claudeVersion?: string;
   model?: string;
   startedAt: string;
@@ -94,6 +117,7 @@ export type SessionLane = {
 
 export type TimelineKind =
   | 'prompt'
+  | 'said'
   | 'handoff.start'
   | 'handoff.end'
   | 'tool'
@@ -148,6 +172,11 @@ export type BoardState = {
   /** Plan limits are per account, not per session, so they live at the board level. */
   planUsage?: PlanUsage;
   planUsageUpdatedAt?: string;
+  /**
+   * Plan limits of the other harnesses, by harness. Claude Code's stay in
+   * `planUsage`, where every earlier client already reads them.
+   */
+  harnessPlans?: Partial<Record<Exclude<Harness, 'claude-code'>, HarnessPlan>>;
   timeline: TimelineEntry[];
   pendingApprovals: PendingApproval[];
 };

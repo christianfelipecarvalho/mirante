@@ -1,16 +1,18 @@
 import type {
   AgentCard,
   BoardState,
+  HarnessPlan,
   PendingApproval,
   SessionLane,
   TimelineEntry,
   TimelineKind,
 } from './board.js';
 import { MAIN_AGENT_ID } from './agent.js';
-import { dedupeKeyOf, sourceOutranks } from './dedupe.js';
+import { REREADABLE_KINDS, dedupeKeyOf, sourceOutranks } from './dedupe.js';
 import type { MiranteEvent } from './event.js';
-import type { EventSource } from './kinds.js';
+import type { EventSource, Harness } from './kinds.js';
 import { isTerminalState, type CardStatus, type WaitingOn } from './state.js';
+import { livenessOf } from './liveness.js';
 import {
   PLAN_READING_MAX_AGE_MS,
   addTokenUsage,
@@ -62,8 +64,29 @@ export class BoardProjector {
    * child finished.
    */
   private readonly countedStarts = new Set<string>();
+  /**
+   * cardKey → when its current request was typed. A skill reported late — a
+   * transcript read after the next prompt, a log written before a parser knew
+   * how to see it — belongs to an earlier request and must not be shown as in
+   * use now. Arrival order cannot say that; the origin time can.
+   */
+  private readonly promptedAt = new Map<string, string>();
+  /**
+   * cardKey → when the card's model was last seen in one of its own replies.
+   *
+   * A spawn declares a model — often an alias, "opus" — and the replies name
+   * the exact one. The reply wins, and the newest reply wins among replies, so
+   * a re-read start or a late report cannot put back a model the agent has
+   * since stopped using.
+   */
+  private readonly modelSeenAt = new Map<string, string>();
+  private readonly effortSeenAt = new Map<string, string>();
+  /** New execution, rather than arrival order, separates a resume from an old close. */
+  private readonly sessionWorkAt = new Map<string, string>();
   private planUsage: PlanUsage | undefined;
   private planUsageUpdatedAt: string | undefined;
+  /** Every other harness's plan, newest reading each. */
+  private readonly harnessPlans = new Map<Exclude<Harness, 'claude-code'>, HarnessPlan>();
   private lastEventId = 0;
 
   apply(event: MiranteEvent): void {
@@ -74,7 +97,13 @@ export class BoardProjector {
     const key = dedupeKeyOf(event);
     if (key) {
       const previous = this.applied.get(key);
-      if (previous !== undefined && !sourceOutranks(event.source, previous)) return;
+      if (
+        previous !== undefined &&
+        !sourceOutranks(event.source, previous) &&
+        !REREADABLE_KINDS.has(event.kind)
+      ) {
+        return;
+      }
       this.applied.set(key, event.source);
     }
 
@@ -82,6 +111,19 @@ export class BoardProjector {
     // lane exists is what lets the `/usage` probe report them without inventing
     // a session to hang them on.
     if (event.kind === 'plan.usage.updated') {
+      const harness = event.payload.harness;
+      if (harness !== undefined && harness !== 'claude-code') {
+        // Another account, read from its own files: kept apart, newest first.
+        const known = this.harnessPlans.get(harness);
+        if (known === undefined || event.ts >= known.updatedAt) {
+          this.harnessPlans.set(harness, {
+            usage: event.payload.usage,
+            updatedAt: event.ts,
+            ...(event.payload.planType ? { planType: event.payload.planType } : {}),
+          });
+        }
+        return;
+      }
       // The newest reading wins, not the last one applied. Three sources report
       // it — the status line, the cached figure, the /usage command — each dated
       // when the figure was taken, and they do not arrive in that order.
@@ -115,27 +157,55 @@ export class BoardProjector {
     }
 
     const card = this.ensureCard(event);
+    this.observeSessionWork(event, lane, card);
     if (card.lastEventAt === undefined || event.ts > card.lastEventAt) card.lastEventAt = event.ts;
 
     switch (event.kind) {
+      case 'agent.metadata.updated': {
+        const key = cardKey(event.sessionId, event.agentId);
+        const modelAt = this.modelSeenAt.get(key);
+        if (event.payload.model && (modelAt === undefined || event.ts >= modelAt)) {
+          card.model = event.payload.model;
+          this.modelSeenAt.set(key, event.ts);
+          if (card.agentId === MAIN_AGENT_ID) lane.model = event.payload.model;
+        }
+        const effortAt = this.effortSeenAt.get(key);
+        if (
+          event.payload.effort !== undefined &&
+          (effortAt === undefined || event.ts >= effortAt)
+        ) {
+          if (event.payload.effort === null) delete card.effort;
+          else card.effort = event.payload.effort;
+          this.effortSeenAt.set(key, event.ts);
+        }
+        break;
+      }
+
       case 'session.started': {
-        lane.entrypoint = event.payload.entrypoint;
+        if (event.payload.entrypoint !== 'unknown' || lane.entrypoint === 'unknown')
+          lane.entrypoint = event.payload.entrypoint;
         if (event.payload.cwd) {
           lane.projectPath = event.payload.cwd;
           lane.projectName = projectNameOf(event.payload.cwd);
         }
+        if (event.payload.harness) lane.harness = event.payload.harness;
+        const version = event.payload.harnessVersion ?? event.payload.claudeVersion;
+        if (version) lane.harnessVersion = version;
         if (event.payload.claudeVersion) lane.claudeVersion = event.payload.claudeVersion;
         if (event.payload.model) lane.model = event.payload.model;
-        lane.startedAt = event.ts;
+        if (!event.payload.resumed) lane.startedAt = event.ts;
         break;
       }
 
       case 'session.ended': {
+        const workAt = this.sessionWorkAt.get(event.sessionId);
+        if ((workAt && workAt > event.ts) || (lane.endedAt && lane.endedAt > event.ts)) break;
         lane.endedAt = event.ts;
         for (const c of lane.cards) {
-          if (!isTerminalState(c.status.state)) {
-            c.status = active('done');
+          if (c.endedAt === undefined) {
+            if (!isTerminalState(c.status.state)) c.status = active('done');
             c.endedAt = event.ts;
+            c.runningChildren = 0;
             delete c.activity;
             delete c.currentTool;
           }
@@ -144,7 +214,19 @@ export class BoardProjector {
       }
 
       case 'prompt.submitted': {
+        if (card.endedAt && event.ts <= card.endedAt) {
+          this.push(event, 'prompt', event.payload.preview);
+          break;
+        }
         card.status = active('thinking');
+        // A skill is in use for the request that invoked it. Kept past that, a
+        // card would claim a skill from this morning for work it is doing now.
+        const promptKey = cardKey(event.sessionId, event.agentId);
+        const previous = this.promptedAt.get(promptKey);
+        if (previous === undefined || event.ts >= previous) {
+          this.promptedAt.set(promptKey, event.ts);
+          delete card.activeSkill;
+        }
         card.activity = event.payload.preview;
         card.lastActivity = event.payload.preview;
         card.lastActivityKind = 'prompt';
@@ -152,12 +234,36 @@ export class BoardProjector {
         break;
       }
 
+      /*
+       * The agent in its own words.
+       *
+       * A board that shows only tool rows reads as a machine log, while the
+       * terminal beside it reads as someone explaining what they are doing.
+       * This is the same sentence, so the two agree. It clears `activity`: the
+       * agent is talking, not running anything, and the next tool call takes
+       * the line straight back.
+       */
+      case 'agent.said': {
+        delete card.activity;
+        card.lastActivity = event.payload.text;
+        card.lastActivityKind = 'said';
+        this.push(event, 'said', event.payload.text);
+        break;
+      }
+
       case 'agent.started': {
         card.agentType = event.payload.agentType;
         // Kept out of `activity`, which the agent's first tool call overwrites.
         if (event.payload.description) card.task = event.payload.description;
+        // What it was actually asked to do, as far as ingest kept it.
+        if (event.payload.brief) card.brief = event.payload.brief;
+        if (event.payload.briefCharCount !== undefined) {
+          card.briefCharCount = event.payload.briefCharCount;
+        }
         if (event.parentAgentId) card.parentAgentId = event.parentAgentId;
-        if (event.payload.model) card.model = event.payload.model;
+        if (event.payload.model && !this.modelSeenAt.has(cardKey(event.sessionId, event.agentId))) {
+          card.model = event.payload.model;
+        }
         card.spawnMode = event.payload.spawnMode;
         card.startedAt = event.ts;
         if (event.payload.description) {
@@ -168,8 +274,14 @@ export class BoardProjector {
         // A second report of the start can land after the finish — the watcher
         // reads a transcript later than the hook fired. It may correct the
         // details above, but it must not bring a finished agent back to life.
-        const firstReport = !this.countedStarts.has(cardKey(event.sessionId, event.agentId));
-        this.countedStarts.add(cardKey(event.sessionId, event.agentId));
+        // Only a start that declares itself a new assignment may do that, once.
+        const startKey = dedupeKeyOf(event) ?? cardKey(event.sessionId, event.agentId);
+        const firstReport = !this.countedStarts.has(startKey);
+        this.countedStarts.add(startKey);
+        if (firstReport && event.payload.followUp && card.endedAt !== undefined) {
+          delete card.endedAt;
+          delete card.stoppedAtLimit;
+        }
         if (card.endedAt === undefined) {
           card.status = active('thinking');
           if (event.payload.description) card.activity = event.payload.description;
@@ -231,6 +343,15 @@ export class BoardProjector {
       }
 
       case 'tool.started': {
+        if (card.endedAt && event.ts <= card.endedAt) {
+          this.push(
+            event,
+            'tool',
+            event.payload.summary ?? event.payload.toolName,
+            event.payload.toolName,
+          );
+          break;
+        }
         card.status = active('tool_running');
         card.currentTool = {
           toolUseId: event.payload.toolUseId,
@@ -274,7 +395,9 @@ export class BoardProjector {
       }
 
       case 'skill.invoked': {
-        card.activeSkill = event.payload.skillName;
+        const prompted = this.promptedAt.get(cardKey(event.sessionId, event.agentId));
+        if (prompted === undefined || event.ts >= prompted)
+          card.activeSkill = event.payload.skillName;
         this.push(event, 'skill', event.payload.skillName, event.payload.skillName);
         break;
       }
@@ -328,7 +451,12 @@ export class BoardProjector {
         if (event.payload.scope === 'agent') {
           card.tokens = addTokenUsage(card.tokens, event.payload.tokens);
           lane.tokens = addTokenUsage(lane.tokens, event.payload.tokens);
-          if (event.payload.model) card.model = event.payload.model;
+          const key = cardKey(event.sessionId, event.agentId);
+          const seen = this.modelSeenAt.get(key);
+          if (event.payload.model && (seen === undefined || event.ts >= seen)) {
+            card.model = event.payload.model;
+            this.modelSeenAt.set(key, event.ts);
+          }
         }
         // Cost and context come from the status line, which reports per session.
         if (event.payload.costUsd !== undefined) lane.costUsd = event.payload.costUsd;
@@ -345,6 +473,7 @@ export class BoardProjector {
       }
 
       case 'waiting.changed': {
+        if (card.endedAt) break;
         card.status = event.payload.status;
         if (!event.payload.status.waitingOn) delete card.activity;
         else card.activity = event.payload.status.waitingOn.summary;
@@ -372,17 +501,71 @@ export class BoardProjector {
     for (const event of events) this.apply(event);
   }
 
+  private observeSessionWork(event: MiranteEvent, lane: SessionLane, card: AgentCard): void {
+    const beginsWork =
+      event.kind === 'session.started' ||
+      event.kind === 'prompt.submitted' ||
+      event.kind === 'tool.started' ||
+      event.kind === 'permission.requested' ||
+      (event.kind === 'agent.started' && (!card.endedAt || event.payload.followUp));
+    if (!beginsWork || (card.endedAt && event.ts <= card.endedAt)) return;
+    const previous = this.sessionWorkAt.get(event.sessionId);
+    if (previous === undefined || event.ts > previous)
+      this.sessionWorkAt.set(event.sessionId, event.ts);
+
+    if (lane.endedAt && event.ts > lane.endedAt) {
+      delete lane.endedAt;
+      const root = this.cards.get(cardKey(event.sessionId, MAIN_AGENT_ID));
+      if (root?.endedAt) {
+        delete root.endedAt;
+        delete root.stoppedAtLimit;
+        root.status = active('idle');
+      }
+    }
+    // A later prompt or tool is evidence that this particular agent resumed.
+    // Other completed children keep their end markers and stay in history.
+    if (event.kind !== 'agent.started' && card.endedAt && event.ts > card.endedAt) {
+      delete card.endedAt;
+      delete card.stoppedAtLimit;
+      card.status = active('idle');
+    }
+  }
+
+  /** Activity reported by agents, before account limits alter the display. */
+  hasLiveWork(harness: Harness | undefined, now = Date.now()): boolean {
+    return [...this.lanes.values()].some(
+      (lane) =>
+        (harness === undefined || lane.harness === harness) &&
+        !lane.endedAt &&
+        lane.cards.some((card) => livenessOf(card, now) === 'live'),
+    );
+  }
+
   /**
    * `now` exists for the plan-limit overlay: a reading that said 100% stops
    * meaning anything once its window resets, and only a clock can tell.
    */
   snapshot(now: number = Date.now()): BoardState {
-    const limited = this.atPlanLimit(now);
+    // Each harness is held to its own plan: Claude Code's reading never stops
+    // a Codex card, nor Codex's a Claude Code one.
+    const limits = new Map<Harness, WaitingOn | undefined>([
+      ['claude-code', this.atPlanLimit(this.planUsage, this.planUsageUpdatedAt, now)],
+      ...[...this.harnessPlans].map(
+        ([harness, plan]) =>
+          [harness, this.atPlanLimit(plan.usage, plan.updatedAt, now)] as [
+            Harness,
+            WaitingOn | undefined,
+          ],
+      ),
+    ]);
     const sessions = [...this.lanes.values()]
       .map((lane) => ({
         ...lane,
         cards: lane.cards
-          .map((card) => (limited ? this.withRateLimitOverlay(card, limited) : { ...card }))
+          .map((card) => {
+            const limited = limits.get(lane.harness);
+            return limited ? this.withRateLimitOverlay(card, limited) : { ...card };
+          })
           .sort((a, b) => {
             if (a.agentId === MAIN_AGENT_ID) return -1;
             if (b.agentId === MAIN_AGENT_ID) return 1;
@@ -396,6 +579,9 @@ export class BoardProjector {
       sessions,
       ...(this.planUsage ? { planUsage: this.planUsage } : {}),
       ...(this.planUsageUpdatedAt ? { planUsageUpdatedAt: this.planUsageUpdatedAt } : {}),
+      ...(this.harnessPlans.size > 0
+        ? { harnessPlans: Object.fromEntries(this.harnessPlans) as BoardState['harnessPlans'] }
+        : {}),
       timeline: [...this.timeline],
       pendingApprovals: [...this.pending.values()],
     };
@@ -406,25 +592,26 @@ export class BoardProjector {
    * is applied as a display overlay rather than written into card state. That
    * way it disappears by itself when the window resets, with nothing to undo.
    */
-  private atPlanLimit(now: number): WaitingOn | undefined {
-    const readingAge = this.planUsageUpdatedAt
-      ? now - Date.parse(this.planUsageUpdatedAt)
-      : Number.POSITIVE_INFINITY;
+  private atPlanLimit(
+    usage: PlanUsage | undefined,
+    updatedAt: string | undefined,
+    now: number,
+  ): WaitingOn | undefined {
+    const readingAge = updatedAt ? now - Date.parse(updatedAt) : Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(readingAge) || readingAge < 0 || readingAge > PLAN_READING_MAX_AGE_MS)
+      return undefined;
     // `subject` is a stable key the interface localises; `summary` stays English
     // as the required fallback.
     const windows = [
-      ['fiveHour', '5-hour limit', this.planUsage?.fiveHour],
-      ['sevenDay', 'weekly limit', this.planUsage?.sevenDay],
-      ['spendLimit', 'spend limit', this.planUsage?.spendLimit],
+      ['fiveHour', '5-hour limit', usage?.fiveHour],
+      ['sevenDay', 'weekly limit', usage?.sevenDay],
+      ['spendLimit', 'spend limit', usage?.spendLimit],
     ] as const;
     for (const [key, label, window] of windows) {
       // A reading of 100% whose window has since reset says nothing about now.
       // Without this, one stale reading from last night marks every card on the
       // board as rate limited this morning — observed.
       if (window?.resetsAt !== undefined && window.resetsAt * 1000 <= now) continue;
-      // With no reset time to check against, only a recent reading may assert
-      // the limit; otherwise a single 100% would mark cards limited forever.
-      if (window?.resetsAt === undefined && readingAge > PLAN_READING_MAX_AGE_MS) continue;
       if (window && window.usedPercentage >= RATE_LIMIT_THRESHOLD) {
         return {
           summary: window.resetsAt
@@ -432,7 +619,7 @@ export class BoardProjector {
             : `At ${label}`,
           reason: 'plan_limit',
           subject: key,
-          since: this.planUsageUpdatedAt ?? new Date(now).toISOString(),
+          since: updatedAt ?? new Date(now).toISOString(),
           ref: key,
         };
       }
@@ -469,6 +656,7 @@ export class BoardProjector {
       projectName: projectNameOf(event.projectPath),
       ...(event.gitBranch ? { gitBranch: event.gitBranch } : {}),
       entrypoint: 'unknown',
+      harness: 'claude-code',
       startedAt: event.ts,
       tokens: emptyTokenUsage(),
       cards: [],

@@ -69,6 +69,8 @@ export const miranteEventSchema = z.discriminatedUnion('kind', [
   defineEvent('session.started', p.sessionStartedPayload),
   defineEvent('session.ended', p.sessionEndedPayload),
   defineEvent('prompt.submitted', p.promptSubmittedPayload),
+  defineEvent('agent.said', p.agentSaidPayload),
+  defineEvent('agent.metadata.updated', p.agentMetadataUpdatedPayload),
   defineEvent('agent.started', p.agentStartedPayload),
   defineEvent('agent.finished', p.agentFinishedPayload),
   defineEvent('tool.started', p.toolStartedPayload),
