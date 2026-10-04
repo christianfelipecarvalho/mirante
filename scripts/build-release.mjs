@@ -14,7 +14,7 @@
  * Publishing is a separate, deliberate step — see docs/RELEASING.md.
  */
 import { build } from 'esbuild';
-import { chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,7 +49,12 @@ for (const manifestPath of workspaces) {
   }
 }
 
-await rm(out, { recursive: true, force: true });
+// Empty the directory rather than removing it: a shell sitting in release/ (to
+// run `npm publish`) would otherwise be left in a deleted directory.
+await mkdir(out, { recursive: true });
+for (const entry of await readdir(out)) {
+  await rm(join(out, entry), { recursive: true, force: true });
+}
 await mkdir(join(out, 'dist'), { recursive: true });
 
 await build({
@@ -87,7 +92,10 @@ const manifest = {
   repository: cli.repository,
   bugs: cli.bugs,
   type: 'module',
-  bin: cli.bin,
+  // npm rewrites `./dist/bin.js` to `dist/bin.js` on publish and warns about it.
+  bin: Object.fromEntries(
+    Object.entries(cli.bin).map(([name, path]) => [name, path.replace(/^\.\//, '')]),
+  ),
   files: cli.files,
   engines: cli.engines,
   dependencies: Object.fromEntries(
