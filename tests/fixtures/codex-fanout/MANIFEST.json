@@ -1,0 +1,30 @@
+{
+  "name": "codex-fanout",
+  "recordedAt": "2026-09-30T02:17:23.301Z",
+  "harness": "codex",
+  "cliVersion": "0.154.0-alpha.6.2",
+  "files": [
+    {
+      "file": "root.jsonl",
+      "kept": 138,
+      "of": 192
+    },
+    {
+      "file": "subagent-1.jsonl",
+      "kept": 69,
+      "of": 94
+    },
+    {
+      "file": "subagent-2.jsonl",
+      "kept": 71,
+      "of": 97
+    },
+    {
+      "file": "subagent-3.jsonl",
+      "kept": 85,
+      "of": 123
+    }
+  ],
+  "recorderHash": "485dcb860c98",
+  "redaction": "Record types, ids, turn and call ids, timestamps, tool names, agent roles and token counts kept. Messages, commands, outputs, paths, task and skill names replaced; reasoning dropped. Review by hand before committing."
+}

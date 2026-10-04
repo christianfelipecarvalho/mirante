@@ -164,12 +164,20 @@ export class EventLog {
     return run(drafts);
   }
 
-  /** Replay. `afterId` of 0 returns the whole log. */
+  /** A bounded page. Use `replay` to reconstruct state without truncating history. */
   since(afterId: number, limit = 100_000): MiranteEvent[] {
     const rows = this.db
       .prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT ?')
       .all(afterId, limit) as Row[];
     return rows.map(toEvent);
+  }
+
+  /** Streams the entire history, including accounts with more than 100,000 events. */
+  *replay(afterId = 0): IterableIterator<MiranteEvent> {
+    const rows = this.db
+      .prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC')
+      .iterate(afterId);
+    for (const row of rows) yield toEvent(row as Row);
   }
 
   lastId(): number {

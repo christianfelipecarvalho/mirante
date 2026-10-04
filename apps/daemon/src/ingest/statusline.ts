@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { MAIN_AGENT_ID, emptyTokenUsage, type DraftEvent, type PlanUsage } from '@mirante/shared';
+import {
+  MAIN_AGENT_ID,
+  emptyTokenUsage,
+  reportedEffort,
+  type DraftEvent,
+  type PlanUsage,
+} from '@mirante/shared';
 
 /**
  * The JSON Claude Code pipes to a status line command.
@@ -13,6 +19,7 @@ export const statusLinePayloadSchema = z
   .object({
     session_id: z.string(),
     cwd: z.string().optional(),
+    effort: z.unknown().optional(),
     model: z
       .object({ id: z.string().optional(), display_name: z.string().optional() })
       .passthrough()
@@ -77,6 +84,14 @@ export const statusLineToEvents = (
 
   const events: DraftEvent[] = [];
   const context = payload.context_window;
+  const effort = reportedEffort(payload.effort);
+  if (effort !== undefined) {
+    events.push({
+      ...base,
+      kind: 'agent.metadata.updated',
+      payload: { effort, ...(payload.model?.id ? { model: payload.model.id } : {}) },
+    });
+  }
 
   if (payload.cost?.total_cost_usd !== undefined || context) {
     events.push({

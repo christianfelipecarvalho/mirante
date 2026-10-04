@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MAIN_AGENT_ID, dedupeKeys, type DraftEvent } from '@mirante/shared';
+import { MAIN_AGENT_ID, dedupeKeys, reportedEffort, type DraftEvent } from '@mirante/shared';
 import { preview, summarizeToolInput } from '../core/redact.js';
 
 /**
@@ -15,6 +15,7 @@ export const hookPayloadSchema = z
     cwd: z.string().optional(),
     transcript_path: z.string().optional(),
     permission_mode: z.string().optional(),
+    effort: z.unknown().optional(),
     prompt_id: z.string().optional(),
     /** Present only when the hook fired inside a subagent. Routes the event to the right card. */
     agent_id: z.string().optional(),
@@ -64,7 +65,7 @@ const QUOTA_NOTIFICATIONS = new Set([
   'quota_auto_resume_disabled',
 ]);
 
-export const hookToEvents = (payload: HookPayload, context: HookContext = {}): DraftEvent[] => {
+const hookFacts = (payload: HookPayload, context: HookContext): DraftEvent[] => {
   const ts = context.now ?? new Date().toISOString();
   const base = {
     ts,
@@ -314,4 +315,22 @@ export const hookToEvents = (payload: HookPayload, context: HookContext = {}): D
     default:
       return [];
   }
+};
+
+export const hookToEvents = (payload: HookPayload, context: HookContext = {}): DraftEvent[] => {
+  const now = context.now ?? new Date().toISOString();
+  const events = hookFacts(payload, { ...context, now });
+  const effort = reportedEffort(payload.effort);
+  if (effort !== undefined) {
+    events.push({
+      ts: now,
+      source: 'hook',
+      sessionId: payload.session_id,
+      projectPath: payload.cwd ?? '',
+      agentId: payload.agent_id ?? MAIN_AGENT_ID,
+      kind: 'agent.metadata.updated',
+      payload: { effort },
+    });
+  }
+  return events;
 };
