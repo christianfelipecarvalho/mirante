@@ -2,7 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { EventLog, loadConfig, readToken, type MiranteConfig } from '@mirante/daemon';
-import { locateSessions, readCachedUsageFile, type CacheFailure } from '@mirante/daemon';
+import {
+  locateRollouts,
+  locateSessions,
+  readCachedUsageFile,
+  type CacheFailure,
+} from '@mirante/daemon';
 import { readManifest, readSettings } from '@mirante/installer';
 import { check, heading, line, ui } from './ui.js';
 
@@ -68,6 +73,28 @@ export const doctor = async (overrides: Partial<MiranteConfig> = {}): Promise<nu
   }
   const withSubagents = sessions.filter((s) => s.subagents.length > 0).length;
   check('info', 'Sessions with subagents in the last day', String(withSubagents));
+
+  // Optional: most people run one coding agent, and no Codex is not a fault.
+  // Only rollout files are listed — never the credential file beside them.
+  heading('Codex');
+  const rollouts = locateRollouts(config.codexSessionsDir);
+  if (rollouts.length === 0) {
+    check('info', 'No Codex sessions found', config.codexSessionsDir);
+  } else {
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const recent = rollouts.filter((path) => {
+      try {
+        return statSync(path).mtimeMs >= dayAgo;
+      } catch {
+        return false;
+      }
+    }).length;
+    check(
+      'pass',
+      'Codex rollouts readable',
+      `${recent} threads active in the last day, ${rollouts.length} total`,
+    );
+  }
 
   heading('Installation');
   const manifest = readManifest(config.home);
