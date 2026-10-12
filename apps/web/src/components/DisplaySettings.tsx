@@ -17,11 +17,13 @@ export const DisplaySettings = () => {
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
+  const panel = useRef<HTMLDivElement>(null);
 
   // Closes on Escape and on a click anywhere else — the two ways people expect
   // a menu to go away. Focus returns to the button so the keyboard is not lost.
   useEffect(() => {
     if (!open) return;
+    panel.current?.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setOpen(false);
@@ -39,7 +41,14 @@ export const DisplaySettings = () => {
   }, [open]);
 
   return (
-    <div ref={root} className="relative">
+    <div
+      ref={root}
+      className="relative"
+      onBlur={(event) => {
+        if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node))
+          setOpen(false);
+      }}
+    >
       <button
         ref={trigger}
         type="button"
@@ -48,7 +57,7 @@ export const DisplaySettings = () => {
         aria-controls={panelId}
         aria-label={t('settings.label')}
         title={t('settings.label')}
-        className="pressable grid size-8 cursor-pointer place-items-center rounded-md border transition-colors duration-200 hover:border-[var(--accent)]"
+        className="settings-trigger pressable grid size-8 cursor-pointer place-items-center rounded-md border transition-colors duration-200 hover:border-[var(--accent)]"
         style={{
           borderColor: open ? 'var(--accent)' : 'var(--hairline)',
           color: 'var(--text-secondary)',
@@ -60,11 +69,13 @@ export const DisplaySettings = () => {
       {open && (
         <div
           id={panelId}
-          className="panel-enter absolute top-full right-0 z-30 mt-2 w-[220px] rounded-lg border p-3"
+          ref={panel}
+          role="group"
+          aria-label={t('settings.label')}
+          className="settings-panel panel-enter absolute top-full right-0 z-30 mt-2 w-[220px] rounded-lg border p-3"
           style={{
             background: 'var(--surface-1)',
             borderColor: 'var(--hairline)',
-            boxShadow: '0 12px 32px -12px rgba(0, 0, 0, 0.5)',
           }}
         >
           <Segment label={t('settings.theme')}>
@@ -110,7 +121,7 @@ const Option = ({
     type="button"
     onClick={onClick}
     aria-pressed={selected}
-    className="pressable flex-1 cursor-pointer rounded px-2 py-1 text-[11px] font-medium"
+    className="settings-option pressable flex-1 cursor-pointer rounded px-2 py-1 text-[11px] font-medium"
     style={{
       background: selected ? 'var(--surface-1)' : 'transparent',
       color: selected ? 'var(--text-primary)' : 'var(--text-muted)',

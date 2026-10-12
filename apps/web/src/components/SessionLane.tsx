@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useId, useState, type CSSProperties } from 'react';
 import type { BoardState, Entrypoint, Harness, SessionLane as Lane } from '@mirante/shared';
 import { formatCost, formatDuration, formatTokens } from '../lib/format';
 import { useI18n, type Translate } from '../lib/i18n';
@@ -248,7 +248,7 @@ const ClosedAgents = ({
 }) => {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const id = `closed-${group.bucket}`;
+  const id = useId();
   const silent = group.bucket === 'no_signal';
   const count = group.cards.length;
   const label = silent

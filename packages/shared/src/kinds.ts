@@ -14,7 +14,10 @@ export const EVENT_KINDS = [
   'agent.said',
   'agent.metadata.updated',
   'agent.started',
+  'agent.instruction',
   'agent.finished',
+  // A user-requested control run, regardless of which adapter observes the task.
+  'agent.control.updated',
   'tool.started',
   'tool.finished',
   'tool.failed',
@@ -22,6 +25,7 @@ export const EVENT_KINDS = [
   'permission.requested',
   'permission.resolved',
   'usage.updated',
+  'task.plan.updated',
   'plan.usage.updated',
   'context.compacted',
   'waiting.changed',

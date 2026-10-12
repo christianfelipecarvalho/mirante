@@ -4,10 +4,20 @@ import { join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { BoardProjector, dedupeKeys, type MiranteEvent } from '@mirante/shared';
 import type { MiranteConfig } from '../config.js';
+import {
+  InstructionTranslator,
+  type TranslationInference,
+} from '../core/instruction-translation.js';
 import { EventLog } from '../core/eventlog.js';
 import { PermissionBroker, permissionResponse } from '../core/permissions.js';
+import {
+  AgentController,
+  type ControlLauncher,
+  type ControlProcess,
+} from '../core/agent-control.js';
 import { loadAgentDefinitions } from '../ingest/agents.js';
 import { hookPayloadSchema, hookToEvents } from '../ingest/hooks.js';
 import { statusLinePayloadSchema, statusLineToEvents } from '../ingest/statusline.js';
@@ -38,6 +48,12 @@ export type DaemonOptions = {
    */
   readPlanUsage?: () => Promise<PlanReading>;
   logger?: boolean;
+  /** Replaced in tests: no validation may call a real, billable agent. */
+  controlLauncher?: ControlLauncher;
+  controlTerminate?: (child: ControlProcess, signal: NodeJS.Signals) => void;
+  controlTimeoutMs?: number;
+  /** Test adapter: never loads a real model. */
+  translationInfer?: TranslationInference;
 };
 
 export type Daemon = {
@@ -69,6 +85,10 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
   const log = new EventLog(config.databasePath);
   const projector = new BoardProjector();
   const broker = new PermissionBroker();
+  const translator = new InstructionTranslator({
+    modelDir: config.translationModelDir,
+    infer: options.translationInfer,
+  });
   const sockets = new Set<{ send: (data: string) => void }>();
   let inFlightProbe: Promise<PlanReading> | undefined;
   const probeCwd = join(config.home, 'probe');
@@ -216,6 +236,15 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
     return appended;
   };
 
+  const controller = new AgentController({
+    home: config.home,
+    snapshot: () => projector.snapshot(),
+    append,
+    launch: options.controlLauncher,
+    terminate: options.controlTerminate,
+    timeoutMs: options.controlTimeoutMs,
+  });
+
   const guard = (request: FastifyRequest, reply: FastifyReply): boolean => {
     const result = authorize({
       headers: request.headers as Record<string, unknown>,
@@ -297,6 +326,15 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
     return reply.code(200).send({});
   });
 
+  app.post('/api/instructions/translate', async (request, reply) => {
+    if (!guard(request, reply)) return;
+    const parsed = z
+      .object({ text: z.string().max(64 * 1024), target: z.enum(['pt', 'en']) })
+      .safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid translation request' });
+    return reply.send(await translator.translate(parsed.data.text, parsed.data.target));
+  });
+
   app.get('/api/state', async (request, reply) => {
     if (!guard(request, reply)) return;
     return reply.send(projector.snapshot());
@@ -320,6 +358,29 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
     const last = events.at(-1)?.id;
     return reply.send({ events, hasMore: last !== undefined && last < log.lastId() });
   });
+
+  const controlBody = z.union([
+    z
+      .object({
+        action: z.enum(['verify', 'resume']),
+        agentIds: z.array(z.string().min(1).max(256)).max(100),
+      })
+      .strict(),
+    z.object({ action: z.literal('stop'), runIds: z.array(z.string().uuid()).max(100) }).strict(),
+  ]);
+  app.post<{ Params: { sessionId: string } }>(
+    '/api/sessions/:sessionId/agents/control',
+    async (request, reply) => {
+      if (!guard(request, reply)) return;
+      const parsed = controlBody.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: 'invalid control request' });
+      const result =
+        parsed.data.action === 'stop'
+          ? controller.stop(request.params.sessionId, parsed.data.runIds)
+          : controller.request(request.params.sessionId, parsed.data.agentIds, parsed.data.action);
+      return reply.code(result.ok ? 202 : 409).send(result);
+    },
+  );
 
   app.post<{ Params: { requestId: string } }>(
     '/api/permissions/:requestId',
@@ -414,6 +475,12 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
         log,
         onEvents: ingest,
         ignoreSlugs: new Set([projectSlug(probeCwd)]),
+        knownSessionIds: new Set(
+          projector
+            .snapshot()
+            .sessions.filter((lane) => lane.harness === 'claude-code')
+            .map((lane) => lane.sessionId),
+        ),
         onWarning: (message) => app.log.warn({ message }, 'transcript'),
       })
     : undefined;
@@ -425,6 +492,12 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
         sessionsDir: config.codexSessionsDir,
         log,
         onEvents: ingest,
+        knownThreadIds: new Set(
+          projector
+            .snapshot()
+            .sessions.filter((lane) => lane.harness === 'codex')
+            .flatMap((lane) => [lane.sessionId, ...lane.cards.map((card) => card.agentId)]),
+        ),
         onWarning: (message) => app.log.warn({ message }, 'codex'),
       })
     : undefined;
@@ -462,6 +535,8 @@ export const createDaemon = (options: DaemonOptions): Daemon => {
       watcher?.stop();
       codexWatcher?.stop();
       broker.releaseAll();
+      await controller.close();
+      await translator.close();
       await app.close();
       log.close();
     },

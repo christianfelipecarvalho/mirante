@@ -1,17 +1,20 @@
 import type { DraftEvent, Entrypoint } from '@mirante/shared';
 import {
   MAIN_AGENT_ID,
+  emptyTokenUsage,
   dedupeKeys,
   isInjectedMessage,
   stripEditorContext,
   reportedEffort,
+  isTaskContinuation,
 } from '@mirante/shared';
 import {
   SAID_PREVIEW_LENGTH,
+  captureInstruction,
   preview,
-  previewProse,
   summarizeToolInput,
 } from '../../core/redact.js';
+import { ConfirmedClaudePlans, failedWorkPlanResult } from '../../core/work-plan.js';
 import {
   agentToolResultSchema,
   subagentMetaSchema,
@@ -139,7 +142,7 @@ const OUTCOME_BY_STATUS: Record<string, 'ok' | 'error' | 'interrupted'> = {
  */
 const taskNotificationOf = (
   entry: TranscriptEntry,
-): { taskId: string; outcome: 'ok' | 'error' | 'interrupted' } | undefined => {
+): { taskId: string; outcome: 'ok' | 'error' | 'interrupted'; resultText?: string } | undefined => {
   const attachment = (entry as { attachment?: unknown }).attachment;
   const text =
     entry.type === 'attachment' && typeof attachment === 'object' && attachment !== null
@@ -150,7 +153,42 @@ const taskNotificationOf = (
   if (typeof text !== 'string') return undefined;
   const match = TASK_NOTIFICATION.exec(text);
   const outcome = match?.[2] ? OUTCOME_BY_STATUS[match[2].trim()] : undefined;
-  return match?.[1] && outcome ? { taskId: match[1].trim(), outcome } : undefined;
+  const resultText = /<result>([\s\S]*?)<\/result>/.exec(text)?.[1];
+  return match?.[1] && outcome
+    ? { taskId: match[1].trim(), outcome, ...(resultText ? { resultText } : {}) }
+    : undefined;
+};
+
+const finalAssistantResult = (entry: TranscriptEntry | undefined): string | undefined =>
+  entry?.type === 'assistant' &&
+  entry.message?.stop_reason === 'end_turn' &&
+  toolUseBlocks(entry).length === 0
+    ? promptText(entry)
+    : undefined;
+
+const nativeAgentResult = (result: Record<string, unknown>): string | undefined => {
+  if (result.status !== 'completed' || !Array.isArray(result.content)) return undefined;
+  const text = result.content
+    .filter(
+      (block): block is { type: 'text'; text: string } =>
+        typeof block === 'object' &&
+        block !== null &&
+        block.type === 'text' &&
+        typeof block.text === 'string',
+    )
+    .map((block) => block.text)
+    .join('\n');
+  return text;
+};
+
+const resultDetails = (value: unknown) => {
+  const captured = captureInstruction(value);
+  return {
+    resultAvailability: captured.availability,
+    ...(captured.text ? { resultPreview: captured.text } : {}),
+    ...(captured.charCount === undefined ? {} : { resultCharCount: captured.charCount }),
+    ...(captured.truncated === undefined ? {} : { resultTruncated: captured.truncated }),
+  };
 };
 
 /** Claude Code's window names, mapped onto the keys the rest of Mirante uses. */
@@ -167,6 +205,17 @@ const isFailedResult = (entry: TranscriptEntry): boolean => {
   return contentBlocks(entry).some((b) => b.type === 'tool_result' && b.is_error === true);
 };
 
+/** Prefer the fullest recorded copy, ignoring empty copies from partial flushes. */
+const longestBrief = (...values: (string | undefined)[]): string | undefined =>
+  values
+    .filter((value): value is string => Boolean(value?.trim()))
+    .sort(
+      (a, b) =>
+        Number(captureInstruction(b).availability === 'captured') -
+          Number(captureInstruction(a).availability === 'captured') ||
+        b.trim().length - a.trim().length,
+    )[0];
+
 /** What an `Agent` tool-use block declared, indexed by its tool-use id. */
 type SpawnInfo = {
   subagentType?: string;
@@ -174,6 +223,9 @@ type SpawnInfo = {
   model?: string;
   /** The instruction the parent wrote. The `Agent` result repeats it. */
   prompt?: string;
+  resume?: string;
+  name?: string;
+  background?: boolean;
 };
 
 type EmitContext = {
@@ -184,6 +236,9 @@ type EmitContext = {
   spawnInfoByToolUseId: Map<string, SpawnInfo>;
   agentTypeByAgentId: Map<string, string>;
   warnings: string[];
+  agentIdByRecipient: Map<string, string>;
+  instructionCopies: Set<string>;
+  sourceOwnerByUuid: Map<string, string>;
 };
 
 const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): DraftEvent[] => {
@@ -220,6 +275,23 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     (entry) => entry.type === 'user' || entry.type === 'assistant',
   );
   let sessionStartEmitted = false;
+  const responses = new Map<string, { latest: TranscriptEntry; legacyKeys: Set<string> }>();
+  for (const entry of conversational) {
+    if (
+      entry.type !== 'assistant' ||
+      entry.isApiErrorMessage ||
+      !entry.message?.usage ||
+      !entry.message.id
+    )
+      continue;
+    const response = responses.get(entry.message.id) ?? {
+      latest: entry,
+      legacyKeys: new Set<string>(),
+    };
+    response.latest = entry;
+    if (entry.uuid) response.legacyKeys.add(dedupeKeys.usageForMessage(entry.uuid));
+    responses.set(entry.message.id, response);
+  }
 
   conversational.forEach((entry) => {
     if (entry.promptId) currentPromptId = entry.promptId;
@@ -305,15 +377,21 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
         return;
       }
 
-      if (entry.message?.usage) {
+      const response = entry.message?.id ? responses.get(entry.message.id) : undefined;
+      if (entry.message?.usage && (!response || response.latest === entry)) {
         events.push({
           ...base(entry),
           kind: 'usage.updated',
-          ...(entry.uuid === undefined
-            ? {}
-            : { dedupeKey: dedupeKeys.usageForMessage(entry.uuid) }),
+          ...(response && entry.message.id
+            ? { dedupeKey: `usage.response:${entry.sessionId}:${ctx.agentId}:${entry.message.id}` }
+            : entry.uuid === undefined
+              ? {}
+              : { dedupeKey: dedupeKeys.usageForMessage(entry.uuid) }),
           payload: {
             scope: 'agent',
+            ...(response && entry.message.id
+              ? { responseId: entry.message.id, replacesUsageKeys: [...response.legacyKeys] }
+              : {}),
             tokens: normalizeUsage(entry.message.usage),
             ...(entry.message.model === undefined ? {} : { model: entry.message.model }),
           },
@@ -349,7 +427,39 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
         ctx.toolNameById.set(block.id, block.name);
         // An `Agent` call is a handoff, not a tool row. It becomes `agent.started`
         // once the result carries the agent id.
-        if (block.name === 'Agent') continue;
+        if (block.name === 'Agent' || block.name === 'Task') continue;
+        if (
+          block.name === 'SendMessage' &&
+          typeof block.input === 'object' &&
+          block.input !== null
+        ) {
+          const input = block.input as Record<string, unknown>;
+          if (
+            input.type === 'message' ||
+            input.type === 'broadcast' ||
+            (input.type === undefined && typeof input.recipient === 'string')
+          ) {
+            const recipient =
+              typeof input.recipient === 'string'
+                ? ctx.agentIdByRecipient.get(input.recipient)
+                : undefined;
+            events.push({
+              ...base(entry),
+              agentId: recipient ?? ctx.agentId,
+              kind: 'agent.instruction',
+              // One SendMessage call is one delivery (or broadcast), even when a
+              // later metadata flush resolves its previously unknown recipient.
+              dedupeKey: dedupeKeys.agentInstruction(block.id),
+              correlationId: block.id,
+              payload: {
+                senderAgentId: ctx.agentId,
+                ...(recipient ? { recipientAgentId: recipient } : {}),
+                instructionType: input.type === 'broadcast' ? 'broadcast' : 'message',
+                ...captureInstruction(input.content ?? input.message),
+              },
+            });
+          }
+        }
         // A skill loaded through the `Skill` tool leaves no `attributionSkill`
         // on the entries that follow — observed on 2.1.27x — so the call itself
         // is the report. `lastSkill` keeps a later attribution of the same
@@ -379,10 +489,64 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
 
     if (entry.type !== 'user') return;
 
+    // An explicit source UUID links a delivered copy to a call already read.
+    // Never merge separate messages merely because their text happens to match.
+    if (
+      entry.toolUseResult === undefined &&
+      !contentBlocks(entry).some((block) => block.type === 'tool_result') &&
+      entry.sourceToolAssistantUUID &&
+      ctx.instructionCopies.has(`${ctx.agentId}|${entry.sourceToolAssistantUUID}`)
+    )
+      return;
+    const teammate =
+      /^\s*<teammate-message\b[^>]*\bteammate_id=["']([^"']+)["'][^>]*>([\s\S]*?)<\/teammate-message>\s*$/.exec(
+        promptText(entry),
+      );
+    if (teammate?.[1]) {
+      events.push({
+        ...base(entry),
+        kind: 'agent.instruction',
+        dedupeKey: dedupeKeys.agentInstruction(
+          entry.uuid ?? `${ctx.agentId}:${entry.timestamp ?? ''}`,
+          ctx.agentId,
+        ),
+        payload: {
+          senderAgentId: ctx.agentIdByRecipient.get(teammate[1]) ?? teammate[1],
+          recipientAgentId: ctx.agentId,
+          instructionType: 'message',
+          ...captureInstruction(teammate[2]),
+        },
+      });
+      return;
+    }
+
     if (isHumanPrompt(entry)) {
       // Editor context comes first in the entry; without stripping it the
       // preview holds only "The user opened the file …" and never the request.
       const text = stripEditorContext(promptText(entry));
+      // The opening assignment is recovered on agent.started below, even if
+      // an older transcript omitted isSidechain.
+      if (!isMain && !entry.parentUuid) return;
+      if (!isMain) {
+        events.push({
+          ...base(entry),
+          kind: 'agent.instruction',
+          dedupeKey: dedupeKeys.agentInstruction(
+            entry.uuid ?? `${ctx.agentId}:${entry.timestamp ?? ''}`,
+            ctx.agentId,
+          ),
+          payload: {
+            senderAgentId:
+              (entry.sourceToolAssistantUUID
+                ? ctx.sourceOwnerByUuid.get(entry.sourceToolAssistantUUID)
+                : undefined) ?? 'unknown',
+            recipientAgentId: ctx.agentId,
+            instructionType: 'followup',
+            ...captureInstruction(text),
+          },
+        });
+        return;
+      }
       events.push({
         ...base(entry),
         kind: 'prompt.submitted',
@@ -413,7 +577,9 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
       const description = r.description ?? spawn?.description;
       // Recorded in both places; either will do, and the longer one is the one
       // that was not already cut by whatever wrote it.
-      const brief = r.prompt ?? spawn?.prompt;
+      const brief = longestBrief(r.prompt, spawn?.prompt);
+      const followUp = spawn?.resume === r.agentId;
+      const captured = captureInstruction(brief);
       events.push({
         ...base(entry),
         agentId: r.agentId,
@@ -421,18 +587,50 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
         parentAgentId: ctx.agentId,
         ...(toolUseId === undefined ? {} : { correlationId: toolUseId }),
         kind: 'agent.started',
-        dedupeKey: dedupeKeys.agentStarted(r.agentId),
+        dedupeKey: followUp
+          ? dedupeKeys.agentFollowUp(
+              r.agentId,
+              toolUseId ?? entry.uuid ?? entry.timestamp ?? 'resume',
+            )
+          : dedupeKeys.agentStarted(r.agentId),
         payload: {
           agentType,
+          ...(toolUseId ? { assignmentId: toolUseId } : {}),
+          ...(followUp ? { followUp: true } : {}),
           ...(description === undefined ? {} : { description: preview(description) }),
-          ...(brief === undefined || brief.trim() === ''
-            ? {}
-            : { brief: previewProse(brief), briefCharCount: brief.trim().length }),
+          briefAvailability: captured.availability,
+          ...(captured.text
+            ? {
+                brief: captured.text,
+                briefCharCount: captured.charCount,
+                briefTruncated: captured.truncated,
+              }
+            : {}),
           ...((r.resolvedModel ?? spawn?.model) ? { model: r.resolvedModel ?? spawn?.model } : {}),
           spawnMode: r.isAsync === true || r.status === 'async_launched' ? 'async' : 'sync',
           ...(toolUseId === undefined ? {} : { toolUseId }),
         },
       });
+      if (r.status === 'completed' && !isFailedResult(entry)) {
+        events.push({
+          ...base(entry),
+          agentId: r.agentId,
+          agentType,
+          parentAgentId: ctx.agentId,
+          ...(toolUseId ? { correlationId: toolUseId } : {}),
+          kind: 'agent.finished',
+          dedupeKey:
+            followUp && toolUseId
+              ? dedupeKeys.agentFollowUpFinished(r.agentId, toolUseId)
+              : dedupeKeys.agentFinished(r.agentId),
+          payload: {
+            outcome: 'ok',
+            handedBackTo: ctx.agentId,
+            ...(toolUseId ? { assignmentId: toolUseId } : {}),
+            ...resultDetails(nativeAgentResult(r)),
+          },
+        });
+      }
       return;
     }
 
@@ -458,6 +656,198 @@ const emitForEntries = (entries: readonly TranscriptEntry[], ctx: EmitContext): 
     }
   });
 
+  // Monetary values are native cumulative session snapshots, not estimates.
+  // cost-state has no timestamp: use its preceding dated record, conservatively,
+  // so reparsing an old file cannot make an old charge appear newly measured.
+  if (isMain) {
+    const identity = conversational.find((entry) => entry.sessionId && entry.cwd);
+    let previousTimestamp: string | undefined;
+    for (const [index, entry] of entries.entries()) {
+      if (entry.timestamp && Number.isFinite(Date.parse(entry.timestamp)))
+        previousTimestamp = entry.timestamp;
+      const report =
+        entry.usageReport && typeof entry.usageReport === 'object'
+          ? (entry.usageReport as Record<string, unknown>)
+          : undefined;
+      const session =
+        report?.session && typeof report.session === 'object'
+          ? (report.session as Record<string, unknown>)
+          : undefined;
+      const cost = entry.type === 'cost-state' ? entry.totalCostUSD : session?.total_cost_usd;
+      if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0 || !previousTimestamp)
+        continue;
+      const sessionId = entry.sessionId ?? identity?.sessionId;
+      if (!sessionId || (identity?.sessionId && identity.sessionId !== sessionId)) continue;
+      events.push({
+        ts: previousTimestamp,
+        source: 'transcript',
+        sessionId,
+        projectPath: entry.cwd ?? identity?.cwd ?? '',
+        agentId: MAIN_AGENT_ID,
+        kind: 'usage.updated',
+        dedupeKey: `usage.cost:${sessionId}:${entry.uuid ?? index}`,
+        payload: { scope: 'session', tokens: emptyTokenUsage(), costUsd: cost },
+      });
+    }
+  }
+  return events;
+};
+
+/** Only successful paired calls are facts about the agent's execution checklist. */
+const emitWorkPlans = (
+  streams: readonly {
+    agentId: string;
+    assignmentId?: string;
+    entries: readonly TranscriptEntry[];
+  }[],
+): DraftEvent[] => {
+  const events: DraftEvent[] = [];
+  const plans = new ConfirmedClaudePlans();
+  const prompts = new Map<string, { promptId?: string; scopeId?: string }>();
+  const calls = new Map<
+    string,
+    {
+      owner: string;
+      entry: TranscriptEntry;
+      name: string;
+      input: unknown;
+      promptId?: string;
+      scopeId?: string;
+    }
+  >();
+  const ordered = streams
+    .flatMap(({ agentId, entries }) => entries.map((entry) => ({ agentId, entry })))
+    .sort((a, b) => (a.entry.timestamp ?? '').localeCompare(b.entry.timestamp ?? ''));
+  const agents = new Set(streams.map((stream) => stream.agentId));
+  const recipientByCall = new Map<string, string>();
+  for (const stream of streams)
+    if (stream.assignmentId) recipientByCall.set(stream.assignmentId, stream.agentId);
+  for (const { entry } of ordered) {
+    const recipient = agentToolResultSchema.safeParse(entry.toolUseResult);
+    if (!recipient.success || !agents.has(recipient.data.agentId)) continue;
+    const block = contentBlocks(entry).find((block) => block.type === 'tool_result');
+    if (typeof block?.tool_use_id === 'string')
+      recipientByCall.set(block.tool_use_id, recipient.data.agentId);
+  }
+  const assignments = new Map<string, { id: string; ts: string; sourceUuid?: string }[]>();
+  for (const { entry } of ordered) {
+    for (const block of toolUseBlocks(entry)) {
+      if (block.name !== 'Agent' && block.name !== 'Task') continue;
+      const input =
+        typeof block.input === 'object' && block.input !== null
+          ? (block.input as Record<string, unknown>)
+          : {};
+      const recipient =
+        typeof input.resume === 'string' && agents.has(input.resume)
+          ? input.resume
+          : recipientByCall.get(block.id);
+      if (!recipient) continue;
+      const history = assignments.get(recipient) ?? [];
+      history.push({
+        id: block.id,
+        ts: entry.timestamp ?? '',
+        ...(entry.uuid ? { sourceUuid: entry.uuid } : {}),
+      });
+      assignments.set(recipient, history);
+    }
+  }
+  // Partial transcript flushes can repeat the same result. Prefer its last
+  // recorded copy so an earlier input fallback cannot hide applied native data.
+  const latestResults = new Map<string, Record<string, unknown>>();
+  for (const { entry } of ordered) {
+    if (entry.type !== 'user') continue;
+    for (const block of contentBlocks(entry))
+      if (block.type === 'tool_result' && typeof block.tool_use_id === 'string')
+        latestResults.set(block.tool_use_id, block);
+  }
+  for (const { agentId, entry } of ordered) {
+    const blocks = contentBlocks(entry);
+    const prompt = prompts.get(agentId) ?? {};
+    const assignment = assignments
+      .get(agentId)
+      ?.findLast(
+        (assignment) =>
+          assignment.ts <= (entry.timestamp ?? '') ||
+          (entry.sourceToolAssistantUUID &&
+            assignment.sourceUuid === entry.sourceToolAssistantUUID),
+      );
+    const initialAssignment = streams.find((stream) => stream.agentId === agentId)?.assignmentId;
+    if (assignment || initialAssignment) prompt.scopeId = assignment?.id ?? initialAssignment;
+    if (
+      entry.type === 'user' &&
+      entry.isMeta !== true &&
+      entry.toolUseResult === undefined &&
+      !blocks.some((block) => block.type === 'tool_result') &&
+      !/^\s*<teammate-message\b/.test(promptText(entry)) &&
+      !isInjectedMessage(promptText(entry))
+    ) {
+      if (entry.promptId) prompt.promptId = entry.promptId;
+      if (
+        !assignment &&
+        !initialAssignment &&
+        (!prompt.scopeId || !isTaskContinuation(stripEditorContext(promptText(entry))))
+      )
+        prompt.scopeId = entry.promptId ?? entry.uuid ?? entry.timestamp;
+      prompts.set(agentId, prompt);
+    }
+    if (entry.type === 'assistant') {
+      for (const block of toolUseBlocks(entry)) {
+        if (!['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'].includes(block.name)) continue;
+        calls.set(block.id, {
+          owner: agentId,
+          entry,
+          name: block.name,
+          input: block.input,
+          ...(prompt.promptId ? { promptId: prompt.promptId } : {}),
+          ...(prompt.scopeId ? { scopeId: prompt.scopeId } : {}),
+        });
+      }
+      continue;
+    }
+    if (entry.type !== 'user') continue;
+    const results = blocks.filter(
+      (block) => block.type === 'tool_result' && typeof block.tool_use_id === 'string',
+    );
+    for (const block of results) {
+      const id = block.tool_use_id as string;
+      const call = calls.get(id);
+      if (!call || latestResults.get(id) !== block) continue;
+      // An entry-level structured result belongs to a single result block.
+      // Parallel serialized results can confirm TodoWrite input snapshots, but
+      // must never borrow another result's structured TaskCreate/List output.
+      const output = results.length === 1 ? entry.toolUseResult : undefined;
+      if (block.is_error === true || failedWorkPlanResult(output)) continue;
+      if (
+        !entry.timestamp ||
+        !Number.isFinite(Date.parse(entry.timestamp)) ||
+        (entry.sessionId && call.entry.sessionId && entry.sessionId !== call.entry.sessionId)
+      )
+        continue;
+      const sessionId = call.entry.sessionId ?? entry.sessionId;
+      if (!sessionId) continue;
+      const payload = plans.confirm({
+        toolName: call.name,
+        input: call.input,
+        output,
+        sessionId,
+        agentId: call.owner,
+        ...(call.scopeId ? { scopeId: call.scopeId } : {}),
+      });
+      if (!payload) continue;
+      events.push({
+        ts: entry.timestamp,
+        source: 'transcript',
+        sessionId,
+        projectPath: call.entry.cwd ?? entry.cwd ?? '',
+        agentId: call.owner,
+        ...(call.promptId ? { promptId: call.promptId } : {}),
+        correlationId: id,
+        dedupeKey: dedupeKeys.taskPlan(id, call.owner),
+        kind: 'task.plan.updated',
+        payload,
+      });
+    }
+  }
   return events;
 };
 
@@ -492,7 +882,7 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
   const indexEntry = (entry: TranscriptEntry) => {
     for (const block of toolUseBlocks(entry)) {
       toolNameById.set(block.id, block.name);
-      if (block.name !== 'Agent') continue;
+      if (block.name !== 'Agent' && block.name !== 'Task') continue;
       const input = (
         typeof block.input === 'object' && block.input !== null ? block.input : {}
       ) as Record<string, unknown>;
@@ -501,6 +891,11 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
         ...(typeof input.description === 'string' ? { description: input.description } : {}),
         ...(typeof input.model === 'string' ? { model: input.model } : {}),
         ...(typeof input.prompt === 'string' ? { prompt: input.prompt } : {}),
+        ...(typeof input.resume === 'string' ? { resume: input.resume } : {}),
+        ...(typeof input.name === 'string' ? { name: input.name } : {}),
+        ...(typeof input.run_in_background === 'boolean'
+          ? { background: input.run_in_background }
+          : {}),
       });
     }
   };
@@ -521,8 +916,118 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
     for (const entry of sub.entries)
       for (const b of toolUseBlocks(entry)) ownerByToolUseId.set(b.id, sub.agentId);
 
-  const shared = { toolNameById, spawnInfoByToolUseId, agentTypeByAgentId, warnings };
+  const agentIdByRecipient = new Map<string, string>([[MAIN_AGENT_ID, MAIN_AGENT_ID]]);
+  for (const sub of subagents) agentIdByRecipient.set(sub.agentId, sub.agentId);
+  const ambiguous = new Set<string>();
+  for (const entry of [...main.entries, ...subagents.flatMap((sub) => sub.entries)]) {
+    const result = agentToolResultSchema.safeParse(entry.toolUseResult);
+    if (!result.success) continue;
+    const agentId = result.data.agentId;
+    agentIdByRecipient.set(agentId, agentId);
+    const block = contentBlocks(entry).find((block) => block.type === 'tool_result');
+    const spawn =
+      typeof block?.tool_use_id === 'string'
+        ? spawnInfoByToolUseId.get(block.tool_use_id)
+        : undefined;
+    if (spawn?.name) {
+      const previous = agentIdByRecipient.get(spawn.name);
+      if (previous && previous !== agentId) ambiguous.add(spawn.name);
+      else agentIdByRecipient.set(spawn.name, agentId);
+    }
+  }
+  for (const name of ambiguous) agentIdByRecipient.delete(name);
+  const sourceOwnerByUuid = new Map<string, string>();
+  for (const entry of main.entries)
+    if (entry.uuid) sourceOwnerByUuid.set(entry.uuid, MAIN_AGENT_ID);
+  for (const sub of subagents)
+    for (const entry of sub.entries) if (entry.uuid) sourceOwnerByUuid.set(entry.uuid, sub.agentId);
+  const instructionCopies = new Set<string>();
+  const recipientByTool = new Map<string, string>();
+  for (const sub of subagents)
+    if (sub.meta.toolUseId) recipientByTool.set(sub.meta.toolUseId, sub.agentId);
+  const allEntries = [...main.entries, ...subagents.flatMap((sub) => sub.entries)];
+  for (const entry of allEntries) {
+    const result = agentToolResultSchema.safeParse(entry.toolUseResult);
+    const block = contentBlocks(entry).find((block) => block.type === 'tool_result');
+    if (result.success && typeof block?.tool_use_id === 'string')
+      recipientByTool.set(block.tool_use_id, result.data.agentId);
+  }
+  const assignmentIdAt = (agentId: string, at: string, fallback?: string): string | undefined => {
+    let assignmentId = fallback;
+    let latest = '';
+    for (const entry of allEntries) {
+      if (!entry.timestamp || entry.timestamp > at || entry.timestamp < latest) continue;
+      for (const block of toolUseBlocks(entry)) {
+        if (block.name !== 'Agent' && block.name !== 'Task') continue;
+        if (
+          recipientByTool.get(block.id) !== agentId &&
+          spawnInfoByToolUseId.get(block.id)?.resume !== agentId
+        )
+          continue;
+        assignmentId = block.id;
+        latest = entry.timestamp;
+      }
+    }
+    return assignmentId;
+  };
+  for (const entry of allEntries) {
+    if (!entry.uuid) continue;
+    for (const block of toolUseBlocks(entry)) {
+      const input =
+        typeof block.input === 'object' && block.input !== null
+          ? (block.input as Record<string, unknown>)
+          : {};
+      if (block.name === 'Agent' || block.name === 'Task') {
+        const recipient = recipientByTool.get(block.id);
+        if (recipient) instructionCopies.add(`${recipient}|${entry.uuid}`);
+      } else if (
+        block.name === 'SendMessage' &&
+        (input.type === undefined || input.type === 'message' || input.type === 'broadcast')
+      ) {
+        const recipients =
+          input.type === 'broadcast'
+            ? [...new Set(agentIdByRecipient.values())]
+            : typeof input.recipient === 'string'
+              ? [agentIdByRecipient.get(input.recipient)]
+              : [];
+        for (const recipient of recipients)
+          if (recipient) instructionCopies.add(`${recipient}|${entry.uuid}`);
+      }
+    }
+  }
+  const shared = {
+    instructionCopies,
+    sourceOwnerByUuid,
+    toolNameById,
+    spawnInfoByToolUseId,
+    agentTypeByAgentId,
+    agentIdByRecipient,
+    warnings,
+  };
   const events = emitForEntries(main.entries, { agentId: MAIN_AGENT_ID, ...shared });
+  // Index starts from every parent file before recovering children's copies;
+  // directory ordering must not create an extra launch for nested children.
+  for (const sub of subagents) {
+    const parent = sub.meta.toolUseId ? ownerByToolUseId.get(sub.meta.toolUseId) : undefined;
+    events.push(
+      ...emitForEntries(sub.entries, {
+        agentId: sub.agentId,
+        parentAgentId: parent ?? MAIN_AGENT_ID,
+        ...(sub.meta.agentType ? { agentType: sub.meta.agentType } : {}),
+        ...shared,
+      }),
+    );
+  }
+  events.push(
+    ...emitWorkPlans([
+      { agentId: MAIN_AGENT_ID, entries: main.entries },
+      ...subagents.map((sub) => ({
+        agentId: sub.agentId,
+        ...(sub.meta.toolUseId ? { assignmentId: sub.meta.toolUseId } : {}),
+        entries: sub.entries,
+      })),
+    ]),
+  );
 
   // The authoritative end of each subagent, keyed by agent id. Only ids that are
   // subagents of this session count: the same notification also reports
@@ -535,12 +1040,16 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
   );
   const notified = new Map<
     string,
-    { entry: TranscriptEntry; outcome: 'ok' | 'error' | 'interrupted' }
+    { entry: TranscriptEntry; outcome: 'ok' | 'error' | 'interrupted'; resultText?: string }
   >();
   for (const entry of main.entries) {
     const note = taskNotificationOf(entry);
     if (note && known.has(note.taskId) && !notified.has(note.taskId)) {
-      notified.set(note.taskId, { entry, outcome: note.outcome });
+      notified.set(note.taskId, {
+        entry,
+        outcome: note.outcome,
+        ...(note.resultText ? { resultText: note.resultText } : {}),
+      });
     }
   }
 
@@ -553,14 +1062,64 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
       );
     }
 
-    events.push(
-      ...emitForEntries(sub.entries, {
-        agentId: sub.agentId,
-        parentAgentId: parentAgentId ?? MAIN_AGENT_ID,
-        ...(meta.agentType === undefined ? {} : { agentType: meta.agentType }),
-        ...shared,
-      }),
+    // The child's first user entry is the parent's assignment, not a human
+    // prompt. Recover it when a launch result is absent or was already cut.
+    const first = sub.entries.find((entry) => entry.type === 'user' || entry.type === 'assistant');
+    const childBrief =
+      first?.type === 'user' &&
+      !first.parentUuid &&
+      first.isMeta !== true &&
+      first.toolUseResult === undefined &&
+      !contentBlocks(first).some((block) => block.type === 'tool_result') &&
+      !isInjectedMessage(promptText(first)) &&
+      !/^\s*<teammate-message\b/.test(promptText(first))
+        ? promptText(first)
+        : undefined;
+    const initial = events.find(
+      (event) =>
+        event.kind === 'agent.started' && event.agentId === sub.agentId && !event.payload.followUp,
     );
+    const spawn = meta.toolUseId ? spawnInfoByToolUseId.get(meta.toolUseId) : undefined;
+    const fallbackBrief = longestBrief(spawn?.prompt, childBrief);
+    const captured = captureInstruction(fallbackBrief);
+    if (
+      initial?.kind === 'agent.started' &&
+      captured.text &&
+      (initial.payload.briefAvailability !== 'captured' ||
+        (captured.charCount ?? 0) > (initial.payload.briefCharCount ?? 0))
+    ) {
+      initial.payload.briefAvailability = 'captured';
+      initial.payload.brief = captured.text;
+      initial.payload.briefCharCount = captured.charCount;
+      initial.payload.briefTruncated = captured.truncated;
+    } else if (!initial && first && captured.text && (first.sessionId ?? identity?.sessionId)) {
+      events.push({
+        ts: first.timestamp ?? new Date(0).toISOString(),
+        source: 'transcript',
+        sessionId: first.sessionId ?? identity?.sessionId ?? '',
+        projectPath: first.cwd ?? identity?.cwd ?? '',
+        agentId: sub.agentId,
+        ...(parentAgentId ? { parentAgentId } : {}),
+        ...(first.promptId ? { promptId: first.promptId } : {}),
+        ...(meta.toolUseId ? { correlationId: meta.toolUseId } : {}),
+        kind: 'agent.started',
+        dedupeKey: dedupeKeys.agentStarted(sub.agentId),
+        payload: {
+          agentType: meta.agentType ?? spawn?.subagentType ?? 'unknown',
+          ...(meta.toolUseId ? { assignmentId: meta.toolUseId } : {}),
+          briefAvailability: 'captured',
+          brief: captured.text,
+          briefCharCount: captured.charCount,
+          briefTruncated: captured.truncated,
+          ...((meta.description ?? spawn?.description)
+            ? { description: preview(meta.description ?? spawn?.description) }
+            : {}),
+          ...((meta.model ?? spawn?.model) ? { model: meta.model ?? spawn?.model } : {}),
+          ...(meta.toolUseId ? { toolUseId: meta.toolUseId } : {}),
+          spawnMode: spawn && spawn.background !== true ? 'sync' : 'async',
+        },
+      });
+    }
 
     // Heuristic, and marked as one: a file whose last entry is an assistant
     // `end_turn` is a finished agent. The SubagentStop hook is authoritative when
@@ -570,6 +1129,13 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
     // subagent that hands back through a tool rather than a final message.
     const note = notified.get(sub.agentId);
     if (note && (identity?.sessionId ?? note.entry.sessionId)) {
+      const lastConversation = sub.entries.findLast(
+        (entry) =>
+          (entry.type === 'user' || entry.type === 'assistant') &&
+          (entry.timestamp ?? '') <= (note.entry.timestamp ?? ''),
+      );
+      const resultText = note.resultText ?? finalAssistantResult(lastConversation);
+      const assignmentId = assignmentIdAt(sub.agentId, note.entry.timestamp ?? '', meta.toolUseId);
       events.push({
         ts: note.entry.timestamp ?? new Date(0).toISOString(),
         source: 'transcript',
@@ -580,13 +1146,22 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
         parentAgentId: parentAgentId ?? MAIN_AGENT_ID,
         kind: 'agent.finished',
         dedupeKey: dedupeKeys.agentFinished(sub.agentId),
-        payload: { outcome: note.outcome, handedBackTo: parentAgentId ?? MAIN_AGENT_ID },
+        payload: {
+          outcome: note.outcome,
+          handedBackTo: parentAgentId ?? MAIN_AGENT_ID,
+          ...(assignmentId ? { assignmentId } : {}),
+          ...resultDetails(resultText),
+        },
       });
       continue;
     }
 
     const last = sub.entries.at(-1);
     if (last?.type === 'assistant' && last.message?.stop_reason === 'end_turn') {
+      const resultText = finalAssistantResult(last);
+      const assignmentId = assignmentIdAt(sub.agentId, last.timestamp ?? '', meta.toolUseId);
+      const followUp =
+        assignmentId && spawnInfoByToolUseId.get(assignmentId)?.resume === sub.agentId;
       events.push({
         ts: last.timestamp ?? new Date(0).toISOString(),
         source: 'transcript',
@@ -596,8 +1171,15 @@ export const parseSessionTranscript = (input: SessionTranscript): ParseResult =>
         ...(meta.agentType === undefined ? {} : { agentType: meta.agentType }),
         parentAgentId: parentAgentId ?? MAIN_AGENT_ID,
         kind: 'agent.finished',
-        dedupeKey: dedupeKeys.agentFinished(sub.agentId),
-        payload: { outcome: 'ok', handedBackTo: parentAgentId ?? MAIN_AGENT_ID },
+        dedupeKey: followUp
+          ? dedupeKeys.agentFollowUpFinished(sub.agentId, assignmentId)
+          : dedupeKeys.agentFinished(sub.agentId),
+        payload: {
+          outcome: 'ok',
+          handedBackTo: parentAgentId ?? MAIN_AGENT_ID,
+          ...(assignmentId ? { assignmentId } : {}),
+          ...resultDetails(resultText),
+        },
       });
     }
   }

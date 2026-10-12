@@ -61,6 +61,7 @@ export const contentBlockSchema = z.union([
 
 export const messageSchema = z
   .object({
+    id: z.string().optional(),
     role: z.string().optional(),
     model: z.string().optional(),
     stop_reason: z.string().nullish(),

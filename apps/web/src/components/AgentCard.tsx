@@ -16,6 +16,8 @@ import { useI18n, type Translate } from '../lib/i18n';
 import { livenessOf } from '../lib/liveness';
 import { usePointerGlow } from '../lib/pointer-glow';
 import { StateBadge } from './StateBadge';
+import { AgentProgress } from './AgentProgress';
+import { InstructionText } from './InstructionText';
 
 /**
  * The waiting reason, in the reader's language.
@@ -100,11 +102,13 @@ export const AgentCardView = ({
   const liveness = livenessOf(card, now ?? Date.now(), sessionEnded);
   const running = card.status.state === 'tool_running' && liveness === 'live';
   const override =
-    card.status.state === 'error' && card.stoppedAtLimit
+    card.outcome === 'interrupted' || (card.status.state === 'error' && card.stoppedAtLimit)
       ? ('interrupted' as const)
-      : liveness === 'silent'
-        ? ('silent' as const)
-        : undefined;
+      : card.endedAt && !card.outcome && card.status.state !== 'error'
+        ? ('unconfirmed' as const)
+        : liveness === 'silent'
+          ? ('silent' as const)
+          : undefined;
   const badgeTitle =
     override === 'silent' && card.lastEventAt
       ? t('card.silentFor', {
@@ -115,11 +119,10 @@ export const AgentCardView = ({
   return (
     <article
       id={agentAnchor(card.sessionId, card.agentId)}
-      className={`glow-card lantern relative overflow-hidden rounded-lg border py-3 pl-4 pr-3 ${
+      className={`agent-card glow-card lantern relative overflow-hidden rounded-lg border py-3 pl-4 pr-3 ${
         onOpen ? 'cursor-pointer' : ''
       }`}
-      // Lit while the agent is really working, warned while it waits on a
-      // person, dark at rest. See the card section in index.css.
+      // A coloured frame and slow beam mark work; a warm edge marks waiting.
       data-life={liveness === 'live' ? 'working' : waiting ? 'waiting' : 'rest'}
       data-beam={liveness === 'live'}
       style={
@@ -132,6 +135,7 @@ export const AgentCardView = ({
       onPointerMove={onPointerMove}
       onClick={onOpen}
     >
+      <span className="pointer-edge" aria-hidden="true" />
       {/*
         A rail rather than a badge: the agent's colour runs the height of its
         card, so a lane of them reads as a set of channels you can scan down
@@ -141,13 +145,13 @@ export const AgentCardView = ({
       */}
       <span
         aria-hidden="true"
-        className="card-rail absolute inset-y-0 left-0 w-[3px]"
+        className="card-rail absolute inset-y-0 left-0 w-px"
         style={{ background: waiting ? 'var(--status-warning)' : color }}
       />
       <header className="flex items-start gap-2.5">
         <span
           className="card-mark grid size-8 shrink-0 place-items-center rounded-full"
-          style={{ background: `color-mix(in oklab, ${color} 18%, transparent)`, color }}
+          style={{ background: `color-mix(in oklab, ${color} 18%, var(--surface-1))`, color }}
         >
           {/* An inferred role has a mark of its own; otherwise the type decides. */}
           <Icon
@@ -160,8 +164,8 @@ export const AgentCardView = ({
           />
         </span>
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
+        <div className="agent-identity min-w-0 flex-1">
+          <div className="agent-identity-line flex items-center gap-1.5">
             {/*
               The name is the card's control, not the card itself. An <article>
               with an onClick is unreachable by keyboard and announced as
@@ -189,13 +193,13 @@ export const AgentCardView = ({
             {ordinal !== undefined && (
               <span
                 className="tabular shrink-0 rounded px-1 text-[10px] font-medium"
-                style={{ background: `color-mix(in oklab, ${color} 18%, transparent)`, color }}
+                style={{ background: `color-mix(in oklab, ${color} 18%, var(--surface-1))`, color }}
               >
                 {ordinal}
               </span>
             )}
             {!isRoot && (
-              <span className="shrink-0 text-[10px] text-[var(--text-muted)]">
+              <span className="agent-type shrink-0 text-[10px] text-[var(--text-muted)]">
                 {identity.typeLabel ?? t('card.subagent')}
               </span>
             )}
@@ -215,6 +219,7 @@ export const AgentCardView = ({
           </div>
         </div>
 
+        <AgentProgress card={card} now={now ?? Date.now()} sessionEnded={sessionEnded} />
         <StateBadge status={card.status} override={override} title={badgeTitle} />
       </header>
 
@@ -227,7 +232,7 @@ export const AgentCardView = ({
 
       {card.status.waitingOn ? (
         <div
-          className="mt-2 rounded border-l-2 py-1 pl-2 text-[12px]"
+          className="mt-2 rounded border-l py-1 pl-2 text-[12px]"
           style={{ borderColor: 'var(--status-warning)', background: 'var(--surface-2)' }}
         >
           <div className="text-[var(--text-primary)]">{waitingText(card.status.waitingOn, t)}</div>
@@ -247,8 +252,8 @@ export const AgentCardView = ({
               event.stopPropagation();
               onDecide(approval.requestId, 'allow');
             }}
-            className="rounded px-2.5 py-1 text-[11px] font-medium text-white"
-            style={{ background: 'var(--status-good)' }}
+            className="pressable min-h-8 cursor-pointer rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
+            style={{ background: 'var(--action-good)' }}
           >
             {t('card.allow')}
           </button>
@@ -258,8 +263,8 @@ export const AgentCardView = ({
               event.stopPropagation();
               onDecide(approval.requestId, 'deny');
             }}
-            className="rounded px-2.5 py-1 text-[11px] font-medium text-white"
-            style={{ background: 'var(--status-critical)' }}
+            className="pressable min-h-8 cursor-pointer rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
+            style={{ background: 'var(--action-critical)' }}
           >
             {t('card.deny')}
           </button>
@@ -313,38 +318,19 @@ export const AgentCardView = ({
  * and a card with no task either says so rather than leaving a silent gap.
  */
 const BriefBlock = ({ card, color }: { card: Card; color: string }) => {
-  const { t } = useI18n();
-
-  if (!card.brief) {
-    if (card.task) return null;
-    return (
-      <div
-        className="mt-2 rounded border-l-2 py-1 pl-2 text-[11px] text-[var(--text-secondary)]"
-        style={{ borderColor: 'var(--baseline)', background: 'var(--surface-2)' }}
-      >
-        <span className="flex items-center gap-1.5">
-          <Icon name="unknown" size={11} />
-          {t('brief.missing')}
-        </span>
-        <span className="mt-0.5 block">{t('brief.missingWhy')}</span>
-      </div>
-    );
-  }
-
-  const cut =
-    card.briefCharCount !== undefined && card.briefCharCount > card.brief.length
-      ? t('brief.kept', { kept: card.brief.length, total: card.briefCharCount })
-      : undefined;
+  if (!card.brief && !card.briefAvailability && card.task) return null;
 
   return (
     <div
-      className="mt-2 rounded border-l-2 py-1 pl-2 text-[12px]"
+      className="mt-2 rounded border-l py-1 pl-2 text-[12px]"
       style={{ borderColor: color, background: 'var(--surface-2)' }}
     >
-      <blockquote className="line-clamp-2 text-[var(--text-primary)]" title={card.brief}>
-        {card.brief}
-      </blockquote>
-      {cut && <div className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{cut}</div>}
+      <InstructionText
+        text={card.brief}
+        availability={card.briefAvailability}
+        charCount={card.briefCharCount}
+        truncated={card.briefTruncated}
+      />
     </div>
   );
 };

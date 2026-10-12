@@ -64,6 +64,8 @@ export const agentStartedPayload = z.object({
    * typed for the row; this is the work itself.
    */
   brief: previewSchema.optional(),
+  briefAvailability: z.enum(['captured', 'encrypted', 'missing']).optional(),
+  briefTruncated: z.boolean().optional(),
   /** How long the brief was before it was cut, so the card can say what it hides. */
   briefCharCount: z.number().int().nonnegative().optional(),
   model: z.string().optional(),
@@ -84,12 +86,29 @@ export const agentStartedPayload = z.object({
    * finish would come back to life when its transcript is read. See ADR-0008.
    */
   followUp: z.boolean().optional(),
+  /** Native execution scope, when known, for rejecting late plans from an earlier assignment. */
+  assignmentId: z.string().min(1).optional(),
+});
+
+/** A message exchanged between agents, independent of execution lifecycle. */
+export const agentInstructionPayload = z.object({
+  senderAgentId: z.string(),
+  recipientAgentId: z.string().optional(),
+  instructionType: z.enum(['assignment', 'followup', 'message', 'broadcast']),
+  availability: z.enum(['captured', 'encrypted', 'missing']),
+  text: previewSchema.optional(),
+  charCount: z.number().int().nonnegative().optional(),
+  truncated: z.boolean().optional(),
 });
 
 export const agentFinishedPayload = z.object({
   outcome: z.enum(['ok', 'error', 'interrupted']),
   durationMs: z.number().int().nonnegative().optional(),
   resultPreview: previewSchema.optional(),
+  resultAvailability: z.enum(['captured', 'encrypted', 'missing']).optional(),
+  resultTruncated: z.boolean().optional(),
+  resultCharCount: z.number().int().nonnegative().optional(),
+  assignmentId: z.string().min(1).optional(),
   /** Who the work went back to. Drives the handoff line in the timeline. */
   handedBackTo: z.string().optional(),
 });
@@ -149,6 +168,10 @@ export const usageUpdatedPayload = z.object({
   scope: z.enum(['agent', 'session']),
   tokens: tokenUsageSchema,
   costUsd: z.number().nonnegative().optional(),
+  /** Snapshot of one response; later reports replace its counters. */
+  responseId: z.string().optional(),
+  /** Older per-entry charges represented by this response, for append-only repair. */
+  replacesUsageKeys: z.array(z.string()).optional(),
   context: contextUsageSchema.optional(),
   model: z.string().optional(),
 });

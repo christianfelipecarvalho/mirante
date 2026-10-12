@@ -737,6 +737,113 @@ describe('an agent given a second assignment', () => {
   });
 });
 
+describe('recovering recorded assignments without replaying work', () => {
+  const assignment = (run: string, seconds: number, brief?: string) =>
+    ev({
+      kind: 'agent.started',
+      ts: at(seconds),
+      agentId: 'sub1',
+      parentAgentId: MAIN_AGENT_ID,
+      dedupeKey:
+        run === 'initial' ? dedupeKeys.agentStarted('sub1') : dedupeKeys.agentFollowUp('sub1', run),
+      payload: {
+        agentType: 'reviewer',
+        spawnMode: 'async',
+        briefAvailability: brief ? 'captured' : 'missing',
+        ...(brief ? { brief } : {}),
+        ...(run !== 'initial' ? { followUp: true } : {}),
+      },
+    });
+  const finish = () =>
+    ev({
+      kind: 'agent.finished',
+      ts: at(20),
+      agentId: 'sub1',
+      parentAgentId: MAIN_AGENT_ID,
+      payload: { outcome: 'ok' },
+    });
+
+  it('enriches an ended assignment without reviving it or counting another child', () => {
+    const state = board(
+      sessionStart(),
+      assignment('initial', 5),
+      finish(),
+      assignment('initial', 5, 'Recovered text'),
+    );
+    expect(cardOf(state, 'sub1')).toMatchObject({
+      brief: 'Recovered text',
+      briefAvailability: 'captured',
+      endedAt: at(20),
+      outcome: 'ok',
+      status: { state: 'done' },
+    });
+    expect(cardOf(state, 'main')?.runningChildren).toBe(0);
+  });
+
+  it('does not revive a late historical follow-up that predates the recorded finish', () => {
+    const state = board(
+      sessionStart(),
+      assignment('initial', 5),
+      finish(),
+      assignment('old-followup', 10, 'Earlier follow-up'),
+    );
+    expect(cardOf(state, 'sub1')).toMatchObject({
+      endedAt: at(20),
+      outcome: 'ok',
+      status: { state: 'done' },
+    });
+    expect(cardOf(state, 'main')?.runningChildren).toBe(0);
+  });
+
+  it('keeps the current task when an older assignment is enriched later', () => {
+    const state = board(
+      sessionStart(),
+      assignment('initial', 5),
+      finish(),
+      assignment('current', 25, 'Current task'),
+      assignment('initial', 5, 'Old recovered task'),
+    );
+    expect(cardOf(state, 'sub1')).toMatchObject({
+      brief: 'Current task',
+      startedAt: at(25),
+      status: { state: 'thinking' },
+    });
+    expect(cardOf(state, 'main')?.runningChildren).toBe(1);
+  });
+
+  it('keeps captured availability if a later sparse report omits the text', () => {
+    const state = board(
+      sessionStart(),
+      assignment('initial', 5, 'Recorded instruction'),
+      assignment('initial', 5),
+    );
+    expect(cardOf(state, 'sub1')).toMatchObject({
+      brief: 'Recorded instruction',
+      briefAvailability: 'captured',
+    });
+  });
+
+  it('records instructions without creating phantom sessions/cards or changing execution state', () => {
+    const instruction = ev({
+      kind: 'agent.instruction',
+      agentId: 'unknown-recipient',
+      payload: {
+        senderAgentId: 'main',
+        recipientAgentId: 'unknown-recipient',
+        instructionType: 'message',
+        availability: 'captured',
+        text: 'Please investigate.',
+      },
+    });
+    expect(board(instruction).sessions).toHaveLength(0);
+    const projector = new BoardProjector();
+    projector.applyAll([sessionStart(), assignment('initial', 5), finish()]);
+    const before = projector.snapshot().sessions;
+    projector.apply(instruction);
+    expect(projector.snapshot().sessions).toEqual(before);
+  });
+});
+
 describe('the skill a card is using', () => {
   it('belongs to the request that invoked it', () => {
     const state = board(

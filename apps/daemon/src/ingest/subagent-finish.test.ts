@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BoardProjector, MAIN_AGENT_ID, type DraftEvent, type MiranteEvent } from '@mirante/shared';
 import { hookPayloadSchema, hookToEvents } from './hooks.js';
 import { parseSessionTranscript } from './transcript/parse.js';
+import { BRIEF_PREVIEW_LENGTH } from '../core/redact.js';
 
 /**
  * Shapes copied from the session of 2026-09-20, redacted. The notification entry
@@ -37,6 +38,169 @@ const notification = (taskId: string, status: string, timestamp: string) => ({
     commandMode: 'task-notification',
     timestamp,
   },
+});
+
+describe('the completed agent response', () => {
+  const agentCall = {
+    ...prompt,
+    type: 'assistant',
+    uuid: 'spawn-message',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'tool_use', id: 'spawn', name: 'Agent', input: { prompt: 'Assigned work' } },
+      ],
+    },
+  };
+  const nativeResult = (status: string) => ({
+    ...prompt,
+    timestamp: '2026-09-20T22:14:00.000Z',
+    uuid: 'spawn-result',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'spawn' }] },
+    toolUseResult: {
+      agentId: EXPLORE,
+      status,
+      content: [{ type: 'text', text: 'Finished review.\n\nContact person@example.com.' }],
+    },
+  });
+  it('captures a confirmed synchronous AgentOutput response even without the child file', () => {
+    const ended = finishes(
+      parseSessionTranscript({ mainLines: [prompt, agentCall, nativeResult('completed')] }).events,
+    );
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({
+      agentId: EXPLORE,
+      correlationId: 'spawn',
+      payload: {
+        outcome: 'ok',
+        assignmentId: 'spawn',
+        resultAvailability: 'captured',
+        resultTruncated: false,
+        resultPreview: 'Finished review.\n\nContact [redacted].',
+      },
+    });
+  });
+
+  it('does not describe an async launch as a completed response', () => {
+    expect(
+      finishes(
+        parseSessionTranscript({ mainLines: [prompt, agentCall, nativeResult('async_launched')] })
+          .events,
+      ),
+    ).toEqual([]);
+  });
+
+  it('captures only a terminal end_turn answer and keeps paragraphs, redaction and explicit truncation', () => {
+    const text = `Final answer.\n\nUse sk-ant-secret1234567.\n${'x'.repeat(BRIEF_PREVIEW_LENGTH)}`;
+    const child = subagent(EXPLORE);
+    const ended = finishes(
+      parseSessionTranscript({
+        mainLines: [prompt],
+        subagents: [
+          {
+            ...child,
+            lines: [
+              child.lines[0],
+              {
+                ...prompt,
+                type: 'assistant',
+                timestamp: '2026-09-20T22:14:00.000Z',
+                message: {
+                  role: 'assistant',
+                  stop_reason: 'end_turn',
+                  content: [{ type: 'text', text }],
+                },
+              },
+            ],
+          },
+        ],
+      }).events,
+    );
+    expect(ended[0]?.payload).toMatchObject({
+      resultAvailability: 'captured',
+      resultTruncated: true,
+      resultCharCount: text.length,
+    });
+    const response = ended[0]?.payload.resultPreview;
+    expect(response?.length).toBe(BRIEF_PREVIEW_LENGTH);
+    expect(response).toContain('Final answer.\n\nUse [redacted].');
+    expect(response?.endsWith('…')).toBe(true);
+  });
+
+  it('reads the actual result tag of a native task notification', () => {
+    const note = notification(EXPLORE, 'completed', '2026-09-20T22:15:00.000Z');
+    note.attachment.prompt = note.attachment.prompt.replace(
+      '<result>…</result>',
+      '<result>Review complete. Contact person@example.com.</result>',
+    );
+    const ended = finishes(
+      parseSessionTranscript({ mainLines: [prompt, note], subagents: [subagent(EXPLORE)] }).events,
+    );
+    expect(ended[0]?.payload).toMatchObject({
+      resultAvailability: 'captured',
+      resultPreview: 'Review complete. Contact [redacted].',
+    });
+  });
+
+  it('does not label an intermediate narrative as the result when completion contains no answer', () => {
+    const note = notification(EXPLORE, 'completed', '2026-09-20T22:15:00.000Z');
+    note.attachment.prompt = note.attachment.prompt.replace('<result>…</result>', '');
+    const child = subagent(EXPLORE);
+    const ended = finishes(
+      parseSessionTranscript({
+        mainLines: [prompt, note],
+        subagents: [
+          {
+            ...child,
+            lines: [
+              child.lines[0],
+              {
+                ...prompt,
+                type: 'assistant',
+                timestamp: '2026-09-20T22:14:00.000Z',
+                message: {
+                  role: 'assistant',
+                  stop_reason: 'tool_use',
+                  content: [{ type: 'text', text: 'I will inspect the code now.' }],
+                },
+              },
+            ],
+          },
+        ],
+      }).events,
+    );
+    expect(ended[0]?.payload).toMatchObject({ resultAvailability: 'missing' });
+    expect(ended[0]?.payload.resultPreview).toBeUndefined();
+  });
+
+  it('keeps encrypted result availability without persisting ciphertext', () => {
+    const native = nativeResult('completed');
+    native.toolUseResult.content = [{ type: 'text', text: 'gAAAAencrypted_token_here=' }];
+    const ended = finishes(
+      parseSessionTranscript({ mainLines: [prompt, agentCall, native] }).events,
+    );
+    expect(ended[0]?.payload).toMatchObject({ resultAvailability: 'encrypted' });
+    expect(ended[0]?.payload.resultPreview).toBeUndefined();
+  });
+
+  it('captures the final assistant response carried by SubagentStop', () => {
+    const ended = finishes(
+      hookToEvents(
+        hookPayloadSchema.parse({
+          hook_event_name: 'SubagentStop',
+          session_id: SESSION,
+          cwd: '/tmp/project',
+          agent_id: EXPLORE,
+          last_assistant_message: 'Completed. Contact person@example.com.',
+        }),
+      ),
+    );
+    expect(ended[0]?.payload).toMatchObject({
+      resultAvailability: 'captured',
+      resultTruncated: false,
+      resultPreview: 'Completed. Contact [redacted].',
+    });
+  });
 });
 
 /** A subagent whose file ends on an attachment — as the real Explore's does. */

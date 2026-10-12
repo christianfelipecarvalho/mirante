@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { agentIdSchema } from './agent.js';
 import { eventSourceSchema } from './kinds.js';
 import * as p from './payloads.js';
+import { agentControlPayload } from './control.js';
+import { taskPlanPayload } from './work-plan.js';
 
 /**
  * Fields every normalized event carries, whatever produced it.
@@ -72,7 +74,9 @@ export const miranteEventSchema = z.discriminatedUnion('kind', [
   defineEvent('agent.said', p.agentSaidPayload),
   defineEvent('agent.metadata.updated', p.agentMetadataUpdatedPayload),
   defineEvent('agent.started', p.agentStartedPayload),
+  defineEvent('agent.instruction', p.agentInstructionPayload),
   defineEvent('agent.finished', p.agentFinishedPayload),
+  defineEvent('agent.control.updated', agentControlPayload),
   defineEvent('tool.started', p.toolStartedPayload),
   defineEvent('tool.finished', p.toolFinishedPayload),
   defineEvent('tool.failed', p.toolFailedPayload),
@@ -80,6 +84,7 @@ export const miranteEventSchema = z.discriminatedUnion('kind', [
   defineEvent('permission.requested', p.permissionRequestedPayload),
   defineEvent('permission.resolved', p.permissionResolvedPayload),
   defineEvent('usage.updated', p.usageUpdatedPayload),
+  defineEvent('task.plan.updated', taskPlanPayload),
   defineEvent('plan.usage.updated', p.planUsageUpdatedPayload),
   defineEvent('context.compacted', p.contextCompactedPayload),
   defineEvent('waiting.changed', p.waitingChangedPayload),

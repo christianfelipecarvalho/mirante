@@ -12,7 +12,7 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { get } from 'node:http';
+import { get, request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -59,6 +59,41 @@ const httpGet = (url) =>
     }).on('error', reject);
   });
 
+const translateSynthetic = (url) =>
+  new Promise((done, reject) => {
+    const address = new URL(url);
+    const token = address.searchParams.get('token');
+    address.pathname = '/api/instructions/translate';
+    address.search = '';
+    const req = request(
+      address,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => (body += chunk));
+        response.on('end', () => {
+          try {
+            done(JSON.parse(body));
+          } catch {
+            reject(new Error('Invalid local translation response.'));
+          }
+        });
+      },
+    );
+    req.setTimeout(120_000, () => req.destroy(new Error('Local translation timed out.')));
+    req.on('error', reject);
+    req.end(
+      JSON.stringify({
+        text: 'Please review the existing files and preserve `pnpm check`.',
+        target: 'pt',
+      }),
+    );
+  });
+
 try {
   step('Pack release/');
   const packed = JSON.parse(
@@ -67,6 +102,8 @@ try {
   const files = packed.files.map((file) => file.path);
   for (const required of [
     'dist/bin.js',
+    'dist/translation-worker.js',
+    'dist/setup-translations.mjs',
     'web/index.html',
     'package.json',
     'LICENSE',
@@ -84,7 +121,10 @@ try {
   const app = join(work, 'app');
   mkdirSync(app);
   writeFileSync(join(app, 'package.json'), '{"name":"smoke","private":true}\n');
-  sh('npm', ['install', '--no-audit', '--no-fund', join(work, packed.filename)], { cwd: app });
+  sh('npm', ['install', '--no-audit', '--no-fund', join(work, packed.filename)], {
+    cwd: app,
+    env: { ...process.env, ONNXRUNTIME_NODE_INSTALL_CUDA: 'skip' },
+  });
   const bin = join(app, 'node_modules', '.bin', 'mirante');
 
   const home = join(work, 'home');
@@ -94,6 +134,8 @@ try {
   const original = { theme: 'dark', statusLine: { type: 'command', command: 'echo mine' } };
   writeFileSync(settings, `${JSON.stringify(original, null, 2)}\n`);
   const env = { ...process.env, HOME: home, MIRANTE_HOME: join(home, '.mirante') };
+  if (process.env.MIRANTE_SMOKE_TRANSLATION_MODELS)
+    env.MIRANTE_TRANSLATION_MODEL_DIR = process.env.MIRANTE_SMOKE_TRANSLATION_MODELS;
   const mirante = (...args) =>
     sh(bin, [...args, '--port', String(port)], { env, allowFailure: true });
 
@@ -135,6 +177,19 @@ try {
     fail(`The board did not load (HTTP ${page.status}):\n${page.body.slice(0, 300)}`);
   }
   console.log(`  board served at ${url.split('?')[0]}`);
+
+  if (process.env.MIRANTE_SMOKE_TRANSLATION_MODELS) {
+    step('Local translation from the packaged worker');
+    const translated = await translateSynthetic(url);
+    if (
+      !translated.ok ||
+      !translated.translated ||
+      translated.sourceLanguage !== 'en' ||
+      !translated.text.includes('`pnpm check`')
+    )
+      fail('The packaged translation worker did not return the translated synthetic instruction.');
+    console.log('  local translation returned and command preserved');
+  }
 
   step('mirante doctor');
   const doctor = mirante('doctor');

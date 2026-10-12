@@ -9,89 +9,97 @@
 :root {
   color-scheme: dark;
 
-  --surface-1: #1a1a19;
-  --surface-2: #232321;
-  --plane: #0d0d0d;
+  /* GitHub Dark Default, matching the user's installed editor theme.
+     Cards use Primer's raised canvas so the activity frame remains distinct. */
+  --surface-1: #161b22;
+  --surface-2: #10151c;
+  --plane: #0d1117;
 
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #898781;
+  --text-primary: #e6edf3;
+  --text-secondary: #b1bac4;
+  --text-muted: #8b949e;
+  --hover-text-muted: #d0d8df;
+  --hover-text-secondary: #e3e9ee;
 
-  --hairline: rgba(255, 255, 255, 0.1);
-  --gridline: #2c2c2a;
-  --baseline: #383835;
+  --hairline: #30363d;
+  --gridline: #21262d;
+  --baseline: #484f58;
 
-  --accent: #3987e5;
-  --accent-dim: #184f95;
-  --accent-track: #10305c;
+  --accent: #58a6ff;
+  --accent-dim: #1f6feb;
+  --accent-track: #16365a;
+  --selection: #264f78;
 
-  /* Status is fixed and never themed; each use ships with an icon and a label. */
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #d03b3b;
+  /* The theme's semantic and syntax colours, with legible steps in each mode. */
+  --status-good: #3fb950;
+  --status-warning: #d29922;
+  --status-serious: #ffa657;
+  --status-critical: #ff7b72;
+  --action-good: #238636;
+  --action-critical: #b62324;
 
-  /*
-   * Agent identity, in fixed order. Light and dark are separate steps of the
-   * same hues, chosen for their own surface — not one set dimmed for the other.
-   * Declared here so the theme swap needs no JavaScript.
-   */
-  --agent-1: #3987e5;
-  --agent-2: #d95926;
-  --agent-3: #199e70;
-  --agent-4: #c98500;
-  --agent-5: #d55181;
-  --agent-6: #008300;
-  --agent-7: #9085e9;
-  --agent-8: #e66767;
-  --agent-neutral: #898781;
+  --agent-1: #58a6ff;
+  --agent-2: #ffa657;
+  --agent-3: #39c5cf;
+  --agent-4: #d29922;
+  --agent-5: #f778ba;
+  --agent-6: #3fb950;
+  --agent-7: #bc8cff;
+  --agent-8: #ff7b72;
+  --agent-neutral: #8b949e;
 
-  /* The hot centre of a travelling light: brighter than the hue it carries,
-     the way a filament is brighter than the glass around it. */
-  --glow-core: color-mix(in oklab, #ffffff 40%, var(--glow, var(--accent)));
-  /* What a card sinks toward when nothing is happening in it. */
-  --card-off: var(--plane);
+  --glow-highlight: #ffffff 44%;
+  --card-off: var(--surface-2);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 140ms;
+  --duration-normal: 220ms;
+  --duration-context: 300ms;
+  --popover-shadow: 0 14px 36px -12px rgb(0 0 0 / 45%);
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --surface-1: #fcfcfb;
-  --surface-2: #f3f3f0;
-  --plane: #f9f9f7;
+  /* GitHub Light Default is the same visual family, with neutral white canvases. */
+  --surface-1: #ffffff;
+  --surface-2: #f6f8fa;
+  --plane: #f6f8fa;
 
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #898781;
+  --text-primary: #1f2328;
+  --text-secondary: #424a53;
+  --text-muted: #656d76;
+  --hover-text-muted: #3d4851;
+  --hover-text-secondary: #303b44;
 
-  --hairline: rgba(11, 11, 11, 0.1);
-  --gridline: #e1e0d9;
-  --baseline: #c3c2b7;
+  --hairline: #d0d7de;
+  --gridline: #eaeef2;
+  --baseline: #afb8c1;
 
-  --accent: #2a78d6;
-  --accent-dim: #86b6ef;
-  --accent-track: #cde2fb;
+  --accent: #0969da;
+  --accent-dim: #54aeff;
+  --accent-track: #ddf4ff;
+  --selection: #b6e3ff;
 
-  --agent-1: #2a78d6;
-  --agent-2: #eb6834;
-  --agent-3: #1baf7a;
-  --agent-4: #eda100;
-  --agent-5: #e87ba4;
-  --agent-6: #008300;
-  --agent-7: #4a3aa7;
-  --agent-8: #e34948;
-  --agent-neutral: #898781;
+  --status-good: #116329;
+  --status-warning: #7d4e00;
+  --status-serious: #953800;
+  --status-critical: #cf222e;
+  --action-good: #238636;
+  --action-critical: #b62324;
 
-  /* On a pale surface light reads as saturation, not as whiteness. */
-  --glow-core: color-mix(in oklab, #000000 12%, var(--glow, var(--accent)));
-  /*
-   * Light keeps its full surface at rest. There is nowhere to sink to — the
-   * plane is a shade lighter than the cards on it — and the greys these cards
-   * use for their smallest text already sit at 3.5:1 here, so a darker card
-   * would spend contrast that is not there to spend. A resting card in light
-   * says so through its quiet rail, its quiet mark and the absence of a glow.
-   */
-  --card-off: var(--card-surface);
+  --agent-1: #0969da;
+  --agent-2: #953800;
+  --agent-3: #1b7c83;
+  --agent-4: #7d4e00;
+  --agent-5: #bf3989;
+  --agent-6: #116329;
+  --agent-7: #8250df;
+  --agent-8: #cf222e;
+  --agent-neutral: #656d76;
+
+  --glow-highlight: #000000 12%;
+  --card-off: var(--surface-1);
+  --popover-shadow: 0 14px 36px -12px rgb(35 48 58 / 22%);
 }
 
 html,
@@ -110,6 +118,9 @@ body {
     'Segoe UI',
     sans-serif;
   font-size: 14px;
+  line-height: 1.5;
+  accent-color: var(--accent);
+  caret-color: var(--accent);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -137,7 +148,7 @@ body {
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0s !important;
     scroll-behavior: auto !important;
   }
 }
@@ -177,7 +188,7 @@ body {
 
 /* Used when a panel replaces another, so the swap reads as a move, not a cut. */
 .panel-enter {
-  animation: mirante-rise 180ms ease-out;
+  animation: mirante-rise var(--duration-context) var(--ease-out);
 }
 
 @keyframes mirante-sweep {
@@ -216,9 +227,9 @@ body {
    cursor shifts everything around it. */
 .pressable {
   transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease;
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
 }
 
 .pressable:active {
@@ -291,7 +302,7 @@ body {
   }
 }
 .calling {
-  animation: mirante-calling 2.2s ease-out infinite;
+  animation: mirante-calling 2.2s ease-out 2;
 }
 
 /*
@@ -324,6 +335,26 @@ body {
 .topbar-spend {
   justify-content: flex-end;
 }
+.topbar-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  width: 100%;
+  gap: 20px 24px;
+}
+.topbar-plan-secondary {
+  border-inline-start: 0;
+  padding-inline-start: 0;
+}
+.plan-group {
+  display: grid;
+  grid-template-columns: minmax(100px, 118px) repeat(2, minmax(110px, 176px));
+  gap: 16px;
+  width: 100%;
+}
+.plan-meter {
+  width: 100%;
+}
+
 @container (max-width: 1080px) {
   .topbar-grid {
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -340,19 +371,26 @@ body {
   }
 }
 
-/*
- * Cards are windows seen from the lookout.
- *
- * One rule decides the whole treatment: light means work. A card whose agent
- * has actually been heard from recently is lit — its frame carries a travelling
- * beam in the agent's own colour, so six busy agents read as six lit windows
- * rather than one alarm. A card at rest sinks toward the plane behind it.
- * Nothing here carries meaning alone: the state badge, its icon and its word
- * say the same thing in text.
- *
- * `--glow` is the agent's colour, set by the component. `--card-surface` is the
- * surface this card would have if nothing were happening.
- */
+@container (max-width: 440px) {
+  .topbar-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'brand prefs'
+      'spend spend'
+      'limits limits';
+  }
+  .topbar-grid > .topbar-spend {
+    justify-content: flex-start;
+    border-inline-start: 0;
+    padding-inline-start: 0;
+    border-block-start: 1px solid var(--hairline);
+    padding-block-start: 12px;
+    text-align: left;
+  }
+}
+
+/* Agent identity follows the existing lookout metaphor. A steady frame marks
+   work, a warm edge marks waiting, and the words always carry the same state. */
 @property --spin {
   syntax: '<angle>';
   inherits: false;
@@ -360,6 +398,9 @@ body {
 }
 
 .glow-card {
+  /* Resolve on the card so the highlight uses this agent's colour, not the
+     root accent resolved before the local --glow property exists. */
+  --glow-core: color-mix(in oklab, var(--glow-highlight), var(--glow, var(--accent)));
   --card-surface: var(--surface-1);
   /* Keeps the light layers between the card's own background and its content,
      rather than letting them fall behind whatever is underneath. */
@@ -372,15 +413,7 @@ body {
     box-shadow 260ms ease;
 }
 
-/*
- * At rest the window is dark: the card sinks toward the plane behind it, its
- * rail and mark go quiet, and it comes back under the pointer so reading a
- * quiet card never costs a click.
- *
- * What dims is the box, never the words. Fading the whole card took its
- * smallest grey text from 4.8:1 to 4.3:1, under the floor this repo holds; a
- * darker surface under unchanged text reads as "off" and lands at 5.2:1.
- */
+/* Rest changes the surface, never the contrast of its text. */
 .glow-card[data-life='rest'] {
   background: color-mix(in oklab, var(--card-surface) 50%, var(--card-off));
 }
@@ -404,8 +437,10 @@ body {
 }
 
 /* Blocked on a person: the edge says so before anything else is read. */
-.glow-card[data-life='waiting'] {
-  border-color: color-mix(in oklab, var(--status-warning) 45%, var(--hairline));
+.glow-card[data-life='waiting'],
+.glow-card[data-life='waiting']:hover,
+.glow-card[data-life='waiting']:focus-within {
+  border-color: color-mix(in oklab, var(--status-warning) 80%, var(--hairline));
 }
 /* Under the pointer the edge takes the card's own light, so hover answers with
    the agent's colour rather than a house blue. */
@@ -428,52 +463,41 @@ body {
   opacity: 1;
 }
 
-/* Lit: a steady bloom in the agent's colour, the halo of a window at night. */
+/* The coloured frame is an activity signal: it remains visible for the whole
+   live state. A slow beam distinguishes ongoing work from the neutral frame
+   at rest; it never dims the base border or the content. */
 .glow-card[data-life='working'] {
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--glow) 16%, transparent),
-    0 0 26px -6px color-mix(in oklab, var(--glow) 40%, transparent),
-    0 18px 52px -26px color-mix(in oklab, var(--glow) 85%, transparent);
+  border-color: color-mix(in oklab, var(--glow) 78%, var(--hairline));
+  box-shadow: 0 5px 20px -12px color-mix(in oklab, var(--glow) 48%, transparent);
 }
 
-/* A lane holds cards that glow on their own, so it only says "something here is
-   working" — a bloom with no lit edge, one step back from its contents. */
 .glow-card.glow-quiet[data-life='working'] {
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--glow) 10%, transparent),
-    0 22px 64px -34px color-mix(in oklab, var(--glow) 70%, transparent);
+  border-color: color-mix(in oklab, var(--glow) 48%, var(--hairline));
+  box-shadow: none;
 }
 
-/* Small project controls share the agents' live light, with a compact halo. */
 .project-chip[data-life='working'] {
-  box-shadow: inset 0 0 12px -5px color-mix(in oklab, var(--glow) 55%, transparent);
+  box-shadow: inset 0 -2px color-mix(in oklab, var(--glow) 85%, transparent);
 }
 
-/*
- * The beam: one pass of light around the frame, over and over, while the agent
- * works. It replaces the bar that used to sweep the top edge — same claim, made
- * by the whole card, and one moving thing per card instead of two.
- */
 .glow-card[data-beam='true']::before {
   content: '';
   position: absolute;
   inset: 0;
   z-index: 1;
-  border-radius: inherit;
   padding: 2px;
+  border-radius: inherit;
   pointer-events: none;
   background: conic-gradient(
     from var(--spin),
     transparent 0deg,
-    color-mix(in oklab, var(--glow) 22%, transparent) 28deg,
-    var(--glow) 55deg,
-    var(--glow-core) 72deg,
-    var(--glow) 90deg,
-    color-mix(in oklab, var(--glow) 22%, transparent) 118deg,
-    transparent 146deg,
+    color-mix(in oklab, var(--glow) 30%, transparent) 30deg,
+    var(--glow) 62deg,
+    var(--glow-core) 84deg,
+    var(--glow) 106deg,
+    transparent 148deg,
     transparent 360deg
   );
-  /* Keeps only the outermost pixel: a lit frame, not a lit card. */
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
@@ -482,8 +506,9 @@ body {
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: mirante-orbit 4s linear infinite;
+  animation: mirante-orbit 6s linear infinite;
 }
+
 @keyframes mirante-orbit {
   to {
     --spin: 360deg;
@@ -492,8 +517,8 @@ body {
 
 /*
  * The lantern: light follows the pointer across the card. It answers a person's
- * movement — it never plays on its own — and it is the same light as the beam,
- * so hovering a working card reads as leaning toward the window it already lit.
+ * movement. The local edge highlight follows the same point. Hover increases
+ * text contrast; badges keep their own opaque surface beneath their labels.
  */
 .lantern::after {
   content: '';
@@ -516,10 +541,52 @@ body {
   opacity: 1;
 }
 
+.lantern:hover,
+.lantern:focus-within {
+  --text-muted: var(--hover-text-muted);
+  --text-secondary: var(--hover-text-secondary);
+}
+
+.pointer-edge {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 2px;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    200px circle at var(--px, 50%) var(--py, 0%),
+    var(--glow-core),
+    var(--glow) 28%,
+    transparent 75%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  transition: opacity var(--duration-normal) ease;
+}
+
+.lantern:hover .pointer-edge,
+.lantern:focus-within .pointer-edge {
+  opacity: 1;
+}
+
+.lantern:hover .card-mark,
+.lantern:focus-within .card-mark {
+  filter: brightness(1.08) saturate(1.15);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  /* Still say "working", without the travelling light: an evenly lit frame. */
+  /* Keep the complete coloured working frame, without travelling light. */
   .glow-card[data-beam='true']::before {
-    background: color-mix(in oklab, var(--glow) 65%, transparent);
+    background: color-mix(in oklab, var(--glow) 78%, transparent);
+    animation: none;
   }
 }
 
@@ -540,20 +607,93 @@ body {
  * signal travelling in the direction of work. Returning swaps the path's
  * direction in React, so the same animation visibly comes back to the caller.
  */
+.agent-flow {
+  min-width: 0;
+}
+.agent-flow-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-block-end: 8px;
+}
+.agent-flow-filter {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+}
+.agent-flow-filter [aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--surface-1);
+}
+.agent-flow-filter-hint {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.agent-flow-canvas {
+  transform-origin: 0 0;
+}
+.agent-flow-stage {
+  position: relative;
+  overflow: hidden;
+}
+.agent-flow-zoom {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  margin-inline-start: auto;
+}
+.agent-flow-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.agent-flow-zoom-value {
+  min-width: 54px;
+}
+@media (pointer: coarse) {
+  .agent-flow-toolbar button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
 .agent-flow-shell {
   min-width: 0;
   max-width: 100%;
   min-height: 180px;
-  max-height: min(68vh, 760px);
+  height: min(68vh, 760px);
   background-color: var(--surface-1);
   background-image:
     linear-gradient(var(--gridline) 1px, transparent 1px),
     linear-gradient(90deg, var(--gridline) 1px, transparent 1px);
   background-size: 24px 24px;
+  cursor: grab;
+}
+.agent-flow-shell[data-pan-ready='true'] .agent-flow-node {
+  cursor: grab;
+}
+.agent-flow-shell[data-panning='true'],
+.agent-flow-shell[data-panning='true'] * {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .agent-flow-shell[data-compact='true'] {
-  max-height: min(48vh, 420px);
+  height: min(48vh, 420px);
 }
 
 .agent-flow-shell:focus-visible {
@@ -564,6 +704,7 @@ body {
 .agent-flow-edge-track,
 .agent-flow-edge-signal {
   fill: none;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 
@@ -577,7 +718,7 @@ body {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-dasharray: 5 12;
-  animation: mirante-flow-signal 900ms linear infinite;
+  animation: mirante-flow-signal 1200ms linear infinite;
 }
 
 .agent-flow-edge[data-state='waiting'] .agent-flow-edge-signal {
@@ -625,48 +766,429 @@ body {
   }
 }
 
+/* Canvas nodes use the same frame and pointer light as agent cards. Their
+   surface also carries liveness: work is lit, waiting is amber, rest is neutral.
+   The state badge and activity remain readable independently of the light. */
 .agent-flow-node {
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   z-index: 1;
-  border-color: color-mix(in oklab, var(--node-color) 34%, var(--hairline));
-  background: color-mix(in oklab, var(--surface-2) 94%, var(--node-color));
+  border-color: var(--hairline);
+  background: var(--plane);
   color: var(--text-primary);
-  box-shadow: 0 8px 28px -22px var(--node-color);
   transition:
-    border-color 180ms ease,
-    box-shadow 180ms ease,
-    background-color 180ms ease;
+    border-color var(--duration-normal) ease,
+    box-shadow var(--duration-normal) ease,
+    background-color var(--duration-normal) ease;
+}
+
+.agent-flow-node[data-dragging='true'] {
+  cursor: grabbing;
+  z-index: 3;
+  outline: 2px solid var(--glow);
+  outline-offset: 2px;
+}
+.agent-flow-shell[data-node-dragging='true'] {
+  cursor: grabbing;
 }
 
 .agent-flow-node:hover,
 .agent-flow-node:focus-visible {
-  border-color: var(--node-color);
-  box-shadow: 0 10px 32px -16px var(--node-color);
+  border-color: var(--glow);
 }
 
 .agent-flow-node:focus-visible {
-  outline: 2px solid var(--node-color);
+  outline: 2px solid var(--glow);
   outline-offset: 2px;
 }
 
 .agent-flow-node[data-life='working'] {
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--node-color) 18%, transparent),
-    0 10px 34px -15px color-mix(in oklab, var(--node-color) 72%, transparent);
+  --text-muted: var(--hover-text-muted);
+  --text-secondary: var(--hover-text-secondary);
+  background: color-mix(in srgb, var(--glow) 16%, var(--surface-1));
+  border-color: var(--glow);
+  box-shadow: 0 8px 28px -10px color-mix(in oklab, var(--glow) 48%, transparent);
 }
 
 .agent-flow-node[data-life='waiting'] {
-  border-color: color-mix(in oklab, var(--status-warning) 60%, var(--hairline));
+  --text-muted: var(--hover-text-muted);
+  --text-secondary: var(--hover-text-secondary);
+  background: color-mix(in srgb, var(--status-warning) 10%, var(--surface-1));
+  border-color: color-mix(in oklab, var(--status-warning) 80%, var(--hairline));
 }
 
-.agent-flow-node[data-life='closed'],
-.agent-flow-node[data-life='silent'] {
-  filter: saturate(0.55);
-  opacity: 0.72;
+.agent-flow-node:is([data-life='idle'], [data-life='closed'], [data-life='silent']) .card-mark {
+  opacity: 0.62;
+  filter: saturate(0.5);
+}
+
+.agent-flow-node:is([data-life='idle'], [data-life='closed'], [data-life='silent']) .card-rail {
+  opacity: 0.35;
+}
+
+.agent-flow-node:is(:hover, :focus-visible) .card-mark,
+.agent-flow-node:is(:hover, :focus-visible) .card-rail {
+  opacity: 1;
+  filter: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .agent-flow-edge-signal {
     stroke-dasharray: none;
+  }
+}
+
+/* The board is a workspace on a wide screen and a document on a phone. */
+.app-shell {
+  width: 100%;
+  max-width: 1800px;
+  min-height: 100dvh;
+  margin-inline: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.board-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  flex: 1;
+  min-height: 0;
+}
+
+.board-projects {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 4px 4px 2px;
+}
+
+.board-projects > * + * {
+  margin-block-start: 16px;
+}
+
+.board-overview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+}
+
+.board-overview h1 {
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+}
+
+.board-summary {
+  flex: 1;
+}
+
+.board-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding-block-end: 4px;
+}
+
+.project-chip {
+  min-height: 36px;
+  padding-inline: 12px;
+  border-radius: 8px;
+}
+.project-chip[aria-pressed='true'] {
+  font-weight: 600;
+}
+.project-card {
+  padding: 20px;
+}
+.project-card > header h2 {
+  font-size: 17px;
+}
+.agent-card {
+  border-radius: 12px;
+}
+
+.timeline-panel {
+  min-width: 0;
+}
+.timeline-filter {
+  min-height: 30px;
+}
+.timeline-filter[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.timeline-row {
+  padding-block: 9px;
+}
+.timeline-row + .timeline-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.latest-request {
+  padding-block: 12px;
+}
+.latest-cost {
+  min-width: 96px;
+}
+.notice {
+  padding: 48px 24px;
+}
+.notice-title {
+  font-size: 16px;
+  font-weight: 500;
+}
+.notice-body {
+  max-width: 52ch;
+  margin: 8px auto 0;
+  line-height: 1.65;
+}
+
+.session-detail {
+  min-width: 0;
+}
+.detail-tabs {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.detail-tab {
+  flex-shrink: 0;
+  min-height: 38px;
+  border-bottom: 2px solid transparent;
+}
+.detail-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+}
+.detail-content {
+  min-height: 260px;
+}
+
+.settings-trigger {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+}
+.settings-panel {
+  box-shadow: var(--popover-shadow);
+  transform-origin: top right;
+}
+.settings-option {
+  min-height: 34px;
+}
+
+::selection {
+  background: var(--selection);
+  color: var(--text-primary);
+}
+:where(button, a, input, textarea, select) {
+  -webkit-tap-highlight-color: transparent;
+}
+a {
+  text-underline-offset: 3px;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+input[type='checkbox'] {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+@media (hover: hover) {
+  .pressable:where(:not(:disabled)):hover {
+    background-color: color-mix(in oklab, var(--accent) 8%, var(--surface-1));
+  }
+}
+
+.skip-link {
+  position: fixed;
+  inset: 12px auto auto 12px;
+  z-index: 100;
+  transform: translateY(-180%);
+  background: var(--surface-1);
+  padding: 12px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+.skip-link:focus {
+  transform: none;
+}
+
+@media (min-width: 1024px) {
+  .session-detail > header {
+    flex-shrink: 0;
+  }
+  .session-detail .agent-flow {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .session-detail .agent-flow-toolbar {
+    flex-shrink: 0;
+  }
+  .session-detail .agent-flow-shell {
+    flex: 1;
+    height: auto;
+  }
+  .app-shell {
+    height: 100dvh;
+  }
+  .app-shell > :not(.board-workspace, .session-detail) {
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 1023px) {
+  .app-shell {
+    padding: 16px;
+    gap: 18px;
+  }
+  .board-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .board-projects {
+    overflow: visible;
+    padding: 0;
+  }
+  .timeline-panel {
+    height: auto;
+    max-height: 420px;
+    min-height: 200px;
+  }
+  .session-detail {
+    flex: auto;
+  }
+  .detail-content {
+    flex: auto;
+    max-height: none;
+    overflow: visible;
+  }
+  .detail-content > div {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 599px) {
+  .app-shell {
+    padding: 12px;
+    gap: 16px;
+  }
+  .topbar-grid {
+    column-gap: 12px;
+  }
+  .topbar-grid > .topbar-cell {
+    padding-inline-start: 12px;
+  }
+  .topbar-grid > .topbar-limits {
+    padding-inline-start: 0;
+  }
+  .topbar-plans {
+    gap: 14px;
+    width: 100%;
+  }
+  .topbar-plan-secondary {
+    border-inline-start: 0;
+    padding-inline-start: 0;
+    width: 100%;
+  }
+  .plan-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+    width: 100%;
+  }
+  .plan-account {
+    grid-column: 1 / -1;
+    width: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .plan-meter {
+    width: 100%;
+  }
+  .board-overview {
+    gap: 10px;
+  }
+  .board-summary {
+    flex-basis: 100%;
+  }
+  .board-controls > div {
+    flex-basis: 100%;
+  }
+  .project-card {
+    padding: 14px;
+  }
+  .project-card > header h2 {
+    font-size: 16px;
+    overflow-wrap: anywhere;
+  }
+  .latest-request {
+    grid-template-columns: 2px minmax(0, 1fr);
+    padding-right: 0;
+  }
+  .latest-cost {
+    grid-column: 2;
+    grid-row: auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    margin-top: 8px;
+    order: 1;
+  }
+  .agent-card > header {
+    flex-wrap: wrap;
+  }
+  .agent-card > header > .agent-identity {
+    flex-basis: calc(100% - 44px);
+  }
+  .agent-identity-line {
+    flex-wrap: wrap;
+  }
+  .agent-type {
+    flex-basis: 100%;
+  }
+  .agent-card > header > .state-badge {
+    margin-inline-start: 42px;
+  }
+  .session-heading {
+    overflow-wrap: anywhere;
+  }
+  .activity-row {
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    column-gap: 8px;
+  }
+  .activity-agent {
+    grid-column: 3 / -1;
+    grid-row: 1;
+    max-width: none;
+  }
+  .activity-message {
+    grid-column: 1 / 4;
+  }
+  .activity-group-status {
+    max-width: 48%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+}
+
+@media (pointer: coarse) {
+  button {
+    min-height: 44px;
+  }
+  .settings-trigger {
+    width: 44px;
+    height: 44px;
   }
 }

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MAIN_AGENT_ID, dedupeKeys, reportedEffort, type DraftEvent } from '@mirante/shared';
-import { preview, summarizeToolInput } from '../core/redact.js';
+import { captureInstruction, preview, summarizeToolInput } from '../core/redact.js';
+import { ConfirmedClaudePlans } from '../core/work-plan.js';
 
 /**
  * Hook payloads, read leniently.
@@ -142,7 +143,8 @@ const hookFacts = (payload: HookPayload, context: HookContext): DraftEvent[] => 
           ]
         : [];
 
-    case 'SubagentStop':
+    case 'SubagentStop': {
+      const result = captureInstruction(payload.last_assistant_message);
       return payload.agent_id
         ? [
             {
@@ -151,10 +153,18 @@ const hookFacts = (payload: HookPayload, context: HookContext): DraftEvent[] => 
               parentAgentId: MAIN_AGENT_ID,
               kind: 'agent.finished',
               dedupeKey: dedupeKeys.agentFinished(payload.agent_id),
-              payload: { outcome: 'ok', handedBackTo: MAIN_AGENT_ID },
+              payload: {
+                outcome: 'ok',
+                handedBackTo: MAIN_AGENT_ID,
+                resultAvailability: result.availability,
+                ...(result.text ? { resultPreview: result.text } : {}),
+                ...(result.charCount === undefined ? {} : { resultCharCount: result.charCount }),
+                ...(result.truncated === undefined ? {} : { resultTruncated: result.truncated }),
+              },
             },
           ]
         : [];
+    }
 
     case 'PreToolUse': {
       // Never blocks. PreToolUse fires on every tool call, so holding it open
@@ -176,9 +186,9 @@ const hookFacts = (payload: HookPayload, context: HookContext): DraftEvent[] => 
       ];
     }
 
-    case 'PostToolUse':
+    case 'PostToolUse': {
       if (!payload.tool_use_id || !payload.tool_name) return [];
-      return [
+      const events: DraftEvent[] = [
         {
           ...base,
           correlationId: payload.tool_use_id,
@@ -187,6 +197,27 @@ const hookFacts = (payload: HookPayload, context: HookContext): DraftEvent[] => 
           payload: { toolUseId: payload.tool_use_id, toolName: payload.tool_name },
         },
       ];
+      // PostToolUse is confirmation; PreToolUse and failure hooks never mutate
+      // execution plans. Hooks have no observed list history, so native task
+      // mutations remain partial until transcript replay supplies TaskList.
+      const plan = new ConfirmedClaudePlans().confirm({
+        toolName: payload.tool_name,
+        input: payload.tool_input,
+        output: payload.tool_response,
+        sessionId: payload.session_id,
+        agentId: base.agentId,
+        ...(payload.prompt_id ? { scopeId: payload.prompt_id } : {}),
+      });
+      if (plan)
+        events.push({
+          ...base,
+          correlationId: payload.tool_use_id,
+          dedupeKey: dedupeKeys.taskPlan(payload.tool_use_id, base.agentId),
+          kind: 'task.plan.updated',
+          payload: plan,
+        });
+      return events;
+    }
 
     case 'PostToolUseFailure':
       if (!payload.tool_use_id || !payload.tool_name) return [];

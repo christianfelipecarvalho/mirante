@@ -1,4 +1,5 @@
 import {
+  completionOf,
   livenessOf,
   SILENT_AFTER_MS,
   type BoardState,
@@ -136,7 +137,8 @@ export const budgetCheckpoint = (board: BoardState, harness: Harness, now: numbe
         brief: card.brief,
         briefCharCount: card.briefCharCount,
         state: card.status.state,
-        completion: card.status.state === 'done' ? 'reported_done' : 'unconfirmed',
+        completion: completionOf(card) === 'completed' ? 'reported_done' : 'unconfirmed',
+        outcome: card.outcome,
         waitingOn: card.status.waitingOn,
         activity: card.activity ?? card.lastActivity,
         lastEventAt: card.lastEventAt,

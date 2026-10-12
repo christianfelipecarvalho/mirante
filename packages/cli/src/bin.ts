@@ -211,7 +211,7 @@ const runStart = async (flags: Map<string, string | boolean>): Promise<number> =
     line();
   }
   line(`  ${ui.dim('Open Claude Code in your terminal or VS Code — the board fills itself.')}`);
-  line(`  ${ui.dim('Ctrl+C to stop. Nothing leaves this machine.')}`);
+  line(`  ${ui.dim('Ctrl+C to stop. Observation stays local; recovery runs use your agent CLI.')}`);
 
   const config = loadConfig(configOverrides(flags));
   const shutdown = () => {

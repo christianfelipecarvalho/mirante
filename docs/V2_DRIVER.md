@@ -2,6 +2,13 @@
 
 **Status: specification. Not implemented. Targeted at M4.**
 
+The current application includes a narrower, explicitly requested CLI recovery
+channel: verify or resume an existing interrupted agent, and stop only the
+recovery processes it started. It does not implement the SDK session pool,
+session creation, model configuration, or terminal injection specified below.
+The default observer still runs without model calls. Recovery reports use the
+shared `agent.control.updated` event and do not replace observed task outcomes.
+
 This document exists in M1 on purpose. Driver mode is the reason the event contract is a hard boundary from the first commit; writing the spec early keeps the observer honest about that boundary.
 
 ## What it is
@@ -32,7 +39,7 @@ The driver adapter owns a pool of SDK sessions. For each, it translates SDK stre
 
 ## Command channel
 
-Observer mode is read-only except for permission decisions. Driver mode adds a command channel, which is new attack surface and is treated as such: same token, same `Origin` validation, and every command is itself recorded in the append-only log.
+Observation is read-only except for permission decisions. The existing CLI recovery channel and the future driver command channel share token and `Origin` validation; each recovery request, acknowledgement, and result is recorded in the append-only log. No command accepts arbitrary shell text or process IDs from the frontend.
 
 | Command             | Effect                                                    |
 | ------------------- | --------------------------------------------------------- |

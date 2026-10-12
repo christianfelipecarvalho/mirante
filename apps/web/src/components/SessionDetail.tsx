@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { BoardState, MiranteEvent, SessionLane } from '@mirante/shared';
+import { useEffect, useId, useMemo, useState } from 'react';
+import type { AgentControlRun, BoardState, MiranteEvent, SessionLane } from '@mirante/shared';
 import { totalTokens } from '@mirante/shared';
 import { formatCost, formatDuration, formatTokens, formatWhen } from '../lib/format';
 import { agentIcon } from '../lib/icons';
@@ -11,6 +11,10 @@ import { buildTurns, type Turn } from '../lib/turns';
 import { useNow } from '../lib/now';
 import { ActivityStream } from './ActivityStream';
 import { AgentFlow } from './AgentFlow';
+import { TaskProgress } from './TaskProgress';
+import { AgentMapDialog } from './AgentMapDialog';
+import { AgentControls } from './AgentControls';
+import type { BoardClient } from '../lib/client';
 import { Icon, type IconName } from './Icon';
 import { AgentCardView } from './AgentCard';
 import { ModelName } from './ModelName';
@@ -27,6 +31,8 @@ export type SessionDetailProps = {
   onDecide: (requestId: string, behavior: 'allow' | 'deny') => void;
   definitions: Map<string, AgentDefinition>;
   onClose: () => void;
+  controlRuns?: AgentControlRun[];
+  onControlAgents?: BoardClient['controlAgents'];
 };
 
 export const SessionDetail = ({
@@ -36,9 +42,12 @@ export const SessionDetail = ({
   onDecide,
   definitions,
   onClose,
+  controlRuns = [],
+  onControlAgents,
 }: SessionDetailProps) => {
   const { t } = useI18n();
   const now = useNow(1_000);
+  const tabsId = useId();
   // Tab and agent live in the URL alongside the session, so a particular agent's
   // activity can be linked to directly and survives a reload.
   const params = new URLSearchParams(window.location.search);
@@ -47,6 +56,7 @@ export const SessionDetail = ({
     TABS.includes(requestedTab as Tab) ? (requestedTab as Tab) : 'flow',
   );
   const [agentId, setAgentId] = useState<string | undefined>(params.get('agent') ?? undefined);
+  const [mapOrder, setMapOrder] = useState<readonly string[]>();
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -75,7 +85,11 @@ export const SessionDetail = ({
   };
 
   return (
-    <div className="motion-safe:panel-enter flex min-h-0 flex-1 flex-col gap-3">
+    <main
+      id="main-content"
+      tabIndex={-1}
+      className="session-detail motion-safe:panel-enter flex min-h-0 flex-1 flex-col gap-4"
+    >
       <header
         className="rounded-xl border px-4 py-3"
         style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
@@ -90,9 +104,9 @@ export const SessionDetail = ({
             <Icon name="back" size={12} />
             {t('detail.back')}
           </button>
-          <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+          <h1 className="session-heading text-[18px] font-semibold text-[var(--text-primary)]">
             {lane.projectName}
-          </h2>
+          </h1>
           {lane.gitBranch && (
             <span className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
               <Icon name="branch" size={11} />
@@ -130,13 +144,36 @@ export const SessionDetail = ({
           </span>
         </div>
 
-        <nav className="mt-3 flex gap-1">
+        <nav role="tablist" aria-label={t('detail.tabs')} className="detail-tabs mt-4 flex gap-1">
           {TABS.map((name) => (
             <button
               key={name}
               type="button"
               onClick={() => setTab(name)}
-              className="pressable cursor-pointer rounded px-3 py-1.5 text-[12px] font-medium"
+              role="tab"
+              id={`${tabsId}-${name}`}
+              aria-controls={`${tabsId}-panel`}
+              aria-selected={tab === name}
+              tabIndex={tab === name ? 0 : -1}
+              onKeyDown={(event) => {
+                const index = TABS.indexOf(name);
+                const next =
+                  event.key === 'ArrowRight'
+                    ? (index + 1) % TABS.length
+                    : event.key === 'ArrowLeft'
+                      ? (index + TABS.length - 1) % TABS.length
+                      : event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? TABS.length - 1
+                          : undefined;
+                const nextTab = next === undefined ? undefined : TABS[next];
+                if (!nextTab) return;
+                event.preventDefault();
+                setTab(nextTab);
+                document.getElementById(`${tabsId}-${nextTab}`)?.focus();
+              }}
+              className="detail-tab pressable cursor-pointer rounded-t-md px-3 py-1.5 text-[12px] font-medium"
               style={{
                 background: tab === name ? 'var(--surface-1)' : 'transparent',
                 color: tab === name ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -151,13 +188,36 @@ export const SessionDetail = ({
         </nav>
       </header>
 
+      {onControlAgents && (
+        <AgentControls lane={lane} runs={controlRuns} now={now} onControl={onControlAgents} />
+      )}
+
       <div
-        className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
+        id={`${tabsId}-panel`}
+        role="tabpanel"
+        aria-labelledby={`${tabsId}-${tab}`}
+        tabIndex={0}
+        className="detail-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border"
         style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
       >
+        {(tab === 'flow' || tab === 'activity') && (
+          <TaskProgress
+            key={tab === 'activity' ? (agentId ?? 'main') : 'main'}
+            card={
+              tab === 'activity' && agentId
+                ? lane.cards.find((card) => card.agentId === agentId)
+                : root
+            }
+            now={now}
+            sessionEnded={Boolean(lane.endedAt)}
+          />
+        )}
         {tab === 'flow' && (
-          <div key="flow" className="motion-safe:panel-enter min-h-0 flex-1 overflow-auto p-3">
-            <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--text-muted)]">
+          <div
+            key="flow"
+            className="motion-safe:panel-enter flex min-h-0 flex-1 flex-col overflow-auto p-3"
+          >
+            <div className="mb-2 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--text-muted)]">
               <span className="font-medium text-[var(--text-secondary)]">{t('flow.legend')}</span>
               <span className="flex items-center gap-1.5">
                 <span className="h-px w-5 bg-[var(--accent)]" />
@@ -172,7 +232,7 @@ export const SessionDetail = ({
                 {t('flow.legend.closed')}
               </span>
             </div>
-            <AgentFlow lane={lane} now={now} onOpen={openAgent} />
+            <AgentFlow lane={lane} now={now} onOpen={openAgent} onOpenMap={setMapOrder} />
           </div>
         )}
 
@@ -251,10 +311,12 @@ export const SessionDetail = ({
                 steps={steps}
                 showAgent={agentId === undefined}
                 hideEmpty={agentId !== undefined}
+                selectedAgentId={agentId}
                 liveStatus={
-                  lane.endedAt
+                  lane.endedAt ||
+                  lane.cards.find((card) => card.agentId === (agentId ?? 'main'))?.endedAt
                     ? undefined
-                    : lane.cards.find((card) => card.agentId === 'main')?.status
+                    : lane.cards.find((card) => card.agentId === (agentId ?? 'main'))?.status
                 }
                 colorOf={(id) => {
                   const index = lane.cards.findIndex((card) => card.agentId === id);
@@ -287,7 +349,22 @@ export const SessionDetail = ({
           </div>
         )}
       </div>
-    </div>
+      {mapOrder && (
+        <AgentMapDialog
+          key={lane.sessionId}
+          lane={lane}
+          events={events}
+          now={now}
+          initialOrder={mapOrder}
+          onClose={() => setMapOrder(undefined)}
+          onOpenAgent={(id) => {
+            setMapOrder(undefined);
+            openAgent(id);
+            window.requestAnimationFrame(() => document.getElementById(`${tabsId}-panel`)?.focus());
+          }}
+        />
+      )}
+    </main>
   );
 };
 
@@ -307,6 +384,7 @@ const AgentChip = ({
   <button
     type="button"
     onClick={onClick}
+    aria-pressed={active}
     className="pressable flex cursor-pointer items-center gap-1.5 rounded-full border px-2 py-1 text-[11px]"
     style={{
       borderColor: active ? color : 'var(--hairline)',

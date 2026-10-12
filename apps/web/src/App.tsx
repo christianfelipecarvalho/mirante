@@ -9,6 +9,7 @@ import { groupProjects, partitionStale } from './lib/projects';
 import { BoardSkeleton } from './components/BoardSkeleton';
 import { BoardSummary } from './components/BoardSummary';
 import { BudgetAlerts } from './components/BudgetAlerts';
+import { Icon } from './components/Icon';
 import { LatestRequest } from './components/LatestRequest';
 import { ProjectBar } from './components/ProjectBar';
 import { ProjectCard, QuietProjects } from './components/ProjectCard';
@@ -17,7 +18,8 @@ import { Timeline } from './components/Timeline';
 import { TopBar } from './components/TopBar';
 
 export const App = () => {
-  const { board, events, definitions, connection, decide, refreshPlanUsage } = useBoard();
+  const { board, events, definitions, connection, decide, refreshPlanUsage, controlAgents } =
+    useBoard();
   const { t } = useI18n();
   const { archived, archive, restoreAll } = useArchive();
   const now = useNow();
@@ -124,11 +126,26 @@ export const App = () => {
     void decide(requestId, behavior);
   };
 
+  const goHome = () => {
+    setOpenSessionId(undefined);
+    setProject('all');
+    setHarness('all');
+    requestAnimationFrame(() => document.getElementById('main-content')?.focus());
+  };
+
   const openLane = board.sessions.find((session) => session.sessionId === openSessionId);
 
   return (
-    <div className="mx-auto flex h-full max-w-[1800px] flex-col gap-3 p-3">
-      <TopBar board={board} connection={connection} onRefreshPlanUsage={refreshPlanUsage} />
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        {t('board.skip')}
+      </a>
+      <TopBar
+        board={board}
+        connection={connection}
+        onRefreshPlanUsage={refreshPlanUsage}
+        onHome={goHome}
+      />
       <BudgetAlerts board={board} now={now} connection={connection} />
 
       {openLane ? (
@@ -140,13 +157,18 @@ export const App = () => {
           onDecide={onDecide}
           definitions={definitions}
           onClose={() => setOpenSessionId(undefined)}
+          controlRuns={board.controlRuns ?? []}
+          onControlAgents={controlAgents}
         />
       ) : (
         <>
-          <BoardSummary summary={summary} harness={onlyHarness} onHarness={setHarness} />
+          <div className="board-overview">
+            <h1>{t('board.title')}</h1>
+            <BoardSummary summary={summary} harness={onlyHarness} onHarness={setHarness} />
+          </div>
 
           {/* Controls sit in one row above what they control, never inside it. */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="board-controls">
             <div className="min-w-0 flex-1">
               <ProjectBar
                 groups={shown}
@@ -182,8 +204,8 @@ export const App = () => {
             onOpen={setOpenSessionId}
           />
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <main className="min-h-0 space-y-3 overflow-y-auto pr-1">
+          <div className="board-workspace">
+            <main id="main-content" tabIndex={-1} className="board-projects">
               {/* Loading, nothing yet, and everything put away are three different
                   answers. Only one of them is bad news. */}
               {visible.length === 0 &&
@@ -254,11 +276,14 @@ const Notice = ({
   action?: { label: string; onClick: () => void };
 }) => (
   <div
-    className="rounded-xl border p-8 text-center"
+    className="notice rounded-xl border text-center"
     style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
   >
-    <p className="text-[13px] text-[var(--text-primary)]">{title}</p>
-    <p className="mt-1 text-[12px] text-[var(--text-secondary)]">{body}</p>
+    <span aria-hidden="true" className="mb-4 inline-flex text-[var(--text-muted)]">
+      <Icon name="agents" size={28} />
+    </span>
+    <p className="notice-title text-[var(--text-primary)]">{title}</p>
+    <p className="notice-body text-[13px] text-[var(--text-secondary)]">{body}</p>
     {action && (
       <button
         type="button"

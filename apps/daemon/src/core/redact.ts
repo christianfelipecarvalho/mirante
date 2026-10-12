@@ -39,11 +39,11 @@ export const SAID_PREVIEW_LENGTH = 400;
  * The instruction one agent writes for another: the longest text on the board
  * worth keeping, and the only one whose internal structure carries meaning.
  *
- * Measured against real sessions, briefs run from 3,000 to 5,000 characters. A
- * screenful is kept here; the rest is not lost quietly — the count of what was
- * written travels with it, so a card can say how much it is not showing.
+ * Keep complete practical assignments, with a 64K-character ceiling for pathological
+ * input. The original character count travels alongside the redacted text so
+ * the interface can state when a longer instruction was cut.
  */
-export const BRIEF_PREVIEW_LENGTH = 700;
+export const BRIEF_PREVIEW_LENGTH = 64 * 1024;
 
 /**
  * A preview of written text, with its paragraphs intact.
@@ -93,12 +93,39 @@ export const summarizeToolInput = (toolName: string, input: unknown): string => 
     Skill: ['skill', 'args'],
     WebFetch: ['url'],
     Task: ['description'],
+    SendMessage: ['content', 'message', 'summary'],
   };
 
   const order = preferred[toolName] ?? ['description', 'command', 'file_path', 'pattern', 'query'];
   for (const key of order) {
     const candidate = fields[key];
-    if (typeof candidate === 'string' && candidate.trim().length > 0) return preview(candidate);
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      if (toolName === 'SendMessage' && captureInstruction(candidate).availability === 'encrypted')
+        return '';
+      return preview(candidate);
+    }
   }
   return '';
+};
+
+/** Ciphertext is availability information, never readable instruction text. */
+export const captureInstruction = (
+  value: unknown,
+): {
+  availability: 'captured' | 'encrypted' | 'missing';
+  text?: string;
+  charCount?: number;
+  truncated?: boolean;
+} => {
+  if (typeof value !== 'string' || !value.trim()) return { availability: 'missing' };
+  const body = value.trim();
+  if (/^gAAAA[A-Za-z0-9_=-]+$/.test(body)) return { availability: 'encrypted' };
+  const redacted = scrubSecrets(body).replace(/\r\n?/g, '\n');
+  const truncated = redacted.length > BRIEF_PREVIEW_LENGTH;
+  return {
+    availability: 'captured',
+    text: truncated ? `${redacted.slice(0, BRIEF_PREVIEW_LENGTH - 1)}…` : redacted,
+    charCount: body.length,
+    truncated,
+  };
 };

@@ -33,6 +33,7 @@ const card = (sessionId: string, spec: CardSpec, index: number): AgentCard =>
         : { state: spec.state },
     ...(spec.skill ? { activeSkill: spec.skill } : {}),
     ...(spec.endedAt ? { endedAt: spec.endedAt } : {}),
+    ...(spec.state === 'done' ? { outcome: 'ok' as const } : {}),
     tokens: { ...emptyTokenUsage(), input: 100 },
     startedAt: '2026-09-20T10:00:00.000Z',
     lastEventAt: spec.lastEventAt ?? '2026-09-20T10:09:00.000Z',

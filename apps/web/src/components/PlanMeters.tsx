@@ -53,9 +53,9 @@ export const PlanMeters = ({
   return (
     <section
       aria-label={`${t('plan.limits')}: ${t('harness.claude-code')}`}
-      className="flex max-w-full min-w-0 flex-wrap items-start gap-x-5 gap-y-2"
+      className="plan-group flex max-w-full min-w-0 flex-wrap items-start gap-x-5 gap-y-2"
     >
-      <div className="flex w-[118px] shrink-0 flex-col items-start gap-1">
+      <div className="plan-account flex w-[118px] shrink-0 flex-col items-start gap-1">
         {/* Whose plan. With Codex on the same board, unlabelled meters would
             read as covering both, and Codex's usage is not read at all. */}
         <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--text-secondary)]">
@@ -135,10 +135,10 @@ export const HarnessPlanMeters = ({
   return (
     <section
       aria-label={`${t('plan.limits')}: ${name}`}
-      className="flex max-w-full min-w-0 flex-wrap items-start gap-x-5 gap-y-2"
+      className="plan-group flex max-w-full min-w-0 flex-wrap items-start gap-x-5 gap-y-2"
       title={t('plan.harnessTitle', { h: name })}
     >
-      <div className="flex w-[118px] shrink-0 flex-col items-start gap-1">
+      <div className="plan-account flex w-[118px] shrink-0 flex-col items-start gap-1">
         <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--text-secondary)]">
           <Icon name="harness" size={11} />
           {name}

@@ -78,7 +78,7 @@ export const LatestRequest = ({ events, sessions, now, onOpen }: LatestRequestPr
       type="button"
       onClick={() => onOpen(latest.sessionId)}
       title={`${t('latest.openSession')} — ${new Date(turn.startedAt).toLocaleString()}`}
-      className="arrive group grid w-full cursor-pointer grid-cols-[3px_minmax(0,1fr)_auto] gap-x-3 rounded-lg py-2 pr-3 text-left transition-colors duration-200 hover:bg-[var(--surface-2)]"
+      className="latest-request arrive group grid w-full cursor-pointer grid-cols-[3px_minmax(0,1fr)_auto] gap-x-3 rounded-lg py-2 pr-3 text-left transition-colors duration-200 hover:bg-[var(--surface-2)]"
     >
       <span className="sr-only">{t('latest.title')}</span>
       <span
@@ -104,7 +104,7 @@ export const LatestRequest = ({ events, sessions, now, onOpen }: LatestRequestPr
       </span>
 
       <span
-        className={`${followedBy ? 'row-span-3' : 'row-span-2'} flex flex-col items-end justify-between gap-1 text-right`}
+        className={`latest-cost ${followedBy ? 'row-span-3' : 'row-span-2'} flex flex-col items-end justify-between gap-1 text-right`}
         title={includes}
       >
         <span className="tabular text-[13px] font-medium text-[var(--text-primary)]">

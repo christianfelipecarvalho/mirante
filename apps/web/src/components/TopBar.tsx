@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { BoardState } from '@mirante/shared';
-import { addTokenUsage, emptyTokenUsage, totalTokens } from '@mirante/shared';
 import type { Connection, PlanUsageRefresh } from '../lib/client';
-import { compactNumber, formatCost } from '../lib/format';
+import { formatWhen } from '../lib/format';
+import { formatLiveCost, formatLiveTokens, summarizeSpend } from '../lib/spend';
 import { useI18n } from '../lib/i18n';
 import { useNow } from '../lib/now';
 import { DisplaySettings } from './DisplaySettings';
@@ -35,29 +35,25 @@ export const TopBar = ({
   board,
   connection,
   onRefreshPlanUsage,
+  onHome,
 }: {
   board: BoardState;
   connection: Connection;
   onRefreshPlanUsage: () => Promise<PlanUsageRefresh>;
+  onHome: () => void;
 }) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const now = useNow();
   const status = CONNECTION_META[connection];
 
-  const tokens = board.sessions
-    .map((session) => session.tokens)
-    .reduce(addTokenUsage, emptyTokenUsage());
-  const costed = board.sessions.filter((session) => session.costUsd !== undefined);
-  const cost = costed.reduce((sum, session) => sum + (session.costUsd ?? 0), 0);
-  // Cost reaches Mirante only through the status line, so an editor-only
-  // session has none. Summing it as $0 would understate the total silently.
-  const costText = costed.length === 0 ? t('spend.unknown') : formatCost(cost);
-  const partial = costed.length > 0 && costed.length < board.sessions.length;
+  const spend = summarizeSpend(board.sessions);
+  const costText =
+    spend.costUsd === undefined ? t('spend.unknown') : formatLiveCost(spend.costUsd, locale);
 
   const seam = useSeam(board.lastEventId, connection === 'live');
 
   return (
-    <header className="topbar relative border-b pb-3" style={{ borderColor: 'var(--hairline)' }}>
+    <header className="topbar relative border-b pb-4" style={{ borderColor: 'var(--hairline)' }}>
       {seam > 0 && (
         <span
           key={seam}
@@ -67,34 +63,48 @@ export const TopBar = ({
       )}
 
       <div className="topbar-grid">
-        <div className="flex items-center gap-2.5" style={{ gridArea: 'brand' }}>
+        <button
+          type="button"
+          onClick={onHome}
+          aria-label={t('brand.home')}
+          title={t('brand.home')}
+          className="brand-home pressable flex cursor-pointer items-center gap-3 rounded-lg text-left"
+          style={{ gridArea: 'brand' }}
+        >
           <span
-            className="grid size-8 shrink-0 place-items-center rounded-lg"
+            className="grid size-10 shrink-0 place-items-center rounded-xl"
             style={{
               background: 'color-mix(in oklab, var(--accent) 16%, transparent)',
               color: 'var(--accent)',
             }}
           >
-            <Logo size={19} />
+            <Logo size={23} />
           </span>
-          <div className="leading-tight">
-            <div className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
+          <span className="block leading-tight">
+            <span className="block text-[18px] font-semibold tracking-tight text-[var(--text-primary)]">
               Mirante
-            </div>
-            <div className="flex items-center gap-1 text-[11px]" style={{ color: status.color }}>
+            </span>
+            <span
+              className="flex items-center gap-1 text-[11px]"
+              role="status"
+              style={{ color: status.color }}
+            >
               <Icon name={status.icon} size={10} />
               {t(status.key as 'conn.live')}
-            </div>
-          </div>
-        </div>
+            </span>
+          </span>
+        </button>
 
         <div className="topbar-cell topbar-limits min-w-0" style={{ gridArea: 'limits' }}>
           {/* One block per account. Claude Code's first: it is the one that can
               be read on demand. */}
-          <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+          <div className="topbar-plans flex flex-wrap items-start gap-x-6 gap-y-3">
             <PlanMeters board={board} now={now} onRefresh={onRefreshPlanUsage} />
             {board.harnessPlans?.codex && (
-              <div className="border-l pl-6" style={{ borderColor: 'var(--hairline)' }}>
+              <div
+                className="topbar-plan-secondary border-l pl-6"
+                style={{ borderColor: 'var(--hairline)' }}
+              >
                 <HarnessPlanMeters harness="codex" plan={board.harnessPlans.codex} now={now} />
               </div>
             )}
@@ -102,26 +112,54 @@ export const TopBar = ({
         </div>
 
         <div
-          className="topbar-cell topbar-spend text-right leading-tight"
+          className="topbar-cell topbar-spend min-w-0 text-right leading-tight"
           style={{ gridArea: 'spend' }}
           aria-label={t('spend.label')}
         >
-          <div>
-            <div
-              className="tabular text-[15px] font-semibold"
-              style={{ color: costed.length === 0 ? 'var(--text-muted)' : 'var(--text-primary)' }}
+          <details className="group min-w-0 max-w-[20rem]">
+            <summary
+              className="pressable cursor-pointer list-none rounded py-1 [&::-webkit-details-marker]:hidden"
+              aria-label={t('spend.details')}
             >
-              {costText}
-              {partial && (
-                <span className="ml-1.5 text-[10px] font-normal text-[var(--text-muted)]">
-                  {t('spend.partial')}
-                </span>
-              )}
+              <span
+                className="tabular block text-[15px] font-semibold [overflow-wrap:anywhere]"
+                style={{
+                  color: spend.costUsd === undefined ? 'var(--text-muted)' : 'var(--text-primary)',
+                }}
+              >
+                {costText}
+              </span>
+              <span className="tabular mt-0.5 block text-[11px] text-[var(--text-primary)] [overflow-wrap:anywhere]">
+                {t('spend.tokens', { n: formatLiveTokens(spend.tokens, locale) })}
+              </span>
+              <span className="mt-1 flex items-center justify-end gap-1 text-[10px] text-[var(--text-secondary)]">
+                {spend.reportedSessions
+                  ? t('spend.coverage', {
+                      known: spend.reportedSessions,
+                      total: spend.totalSessions,
+                    })
+                  : t('spend.notReported')}
+                <Icon name="disclose" size={10} />
+              </span>
+            </summary>
+            <div
+              className="mt-2 space-y-1 border-t pt-2 text-left text-[11px] leading-relaxed text-[var(--text-secondary)] [overflow-wrap:anywhere]"
+              style={{ borderColor: 'var(--hairline)' }}
+            >
+              <p>{t('spend.scope', { n: spend.totalSessions })}</p>
+              <p>
+                {spend.usageUpdatedAt
+                  ? t('spend.tokensUpdated', { at: formatWhen(spend.usageUpdatedAt) })
+                  : t('spend.awaitingTokens')}
+              </p>
+              <p>
+                {spend.costUpdatedAt
+                  ? t('spend.costUpdated', { at: formatWhen(spend.costUpdatedAt) })
+                  : t('spend.awaitingCost')}
+              </p>
+              <p>{t('spend.sourceHelp')}</p>
             </div>
-            <div className="tabular mt-0.5 text-[11px] text-[var(--text-muted)]">
-              {t('spend.tokens', { n: compactNumber(totalTokens(tokens)) })}
-            </div>
-          </div>
+          </details>
         </div>
 
         <div className="topbar-cell" style={{ gridArea: 'prefs' }}>

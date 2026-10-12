@@ -1,6 +1,6 @@
 {
   "name": "mirante",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.2",
   "type": "module",
   "license": "MIT",
   "description": "Local lookout for coding agents. See every agent, what it's doing, what it's waiting on, and what it costs.",

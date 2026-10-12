@@ -24,6 +24,20 @@ export const CATEGORY_ICON: Record<ToolCategory, IconName> = {
   other: 'dot',
 };
 
+/** File and tool icons borrow the editor-like identity palette. Error colours
+ * always override these category colours at the call site. */
+export const CATEGORY_COLOR: Record<ToolCategory, string> = {
+  shell: 'var(--agent-6)',
+  read: 'var(--agent-1)',
+  write: 'var(--agent-4)',
+  search: 'var(--agent-7)',
+  web: 'var(--agent-3)',
+  agent: 'var(--agent-2)',
+  skill: 'var(--agent-5)',
+  wait: 'var(--text-muted)',
+  other: 'var(--text-secondary)',
+};
+
 const BY_TOOL: Record<string, ToolCategory> = {
   Bash: 'shell',
   BashOutput: 'shell',

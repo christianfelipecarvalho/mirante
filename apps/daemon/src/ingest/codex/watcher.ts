@@ -13,6 +13,8 @@ export type CodexWatcherOptions = {
   pollIntervalMs?: number;
   /** Threads untouched for longer than this are not read. Browsable history is M2. */
   maxAgeMs?: number;
+  /** Root and child thread IDs already present in the board, including archives. */
+  knownThreadIds?: ReadonlySet<string>;
   /**
    * Bytes read per pass, across every file. A Codex root runs to tens of
    * megabytes; read in one go on the first pass, it would hold the daemon —
@@ -37,6 +39,8 @@ type Tail = {
   /** Whether the first line — who the thread is — has been read. It is always parsed. */
   identified: boolean;
   state: CodexThreadState;
+  /** Initial historical bytes enrich known facts, never import old execution. */
+  backfillThrough?: number;
 };
 
 /**
@@ -48,7 +52,6 @@ type Tail = {
 const SKIPPED = new Set([
   'response_item/reasoning',
   'response_item/message',
-  'response_item/agent_message',
   'response_item/compaction',
   'event_msg/sub_agent_activity',
   'event_msg/web_search_end',
@@ -127,6 +130,9 @@ export class CodexWatcher {
   private readonly tails = new Map<string, Tail>();
   /** sessionId → event signatures already in the log, so a restart appends nothing twice. */
   private readonly emitted = new Map<string, Set<string>>();
+  private readonly historicalStarts = new Set<string>();
+  /** Exact finishes already observed; old files may enrich their return, never invent a finish. */
+  private readonly historicalFinishes = new Set<string>();
   private timer: NodeJS.Timeout | undefined;
   private scanning = false;
 
@@ -134,6 +140,7 @@ export class CodexWatcher {
     this.options = {
       pollIntervalMs: DEFAULT_POLL_MS,
       maxAgeMs: DEFAULT_MAX_AGE_MS,
+      knownThreadIds: new Set<string>(),
       readBudgetBytes: DEFAULT_READ_BUDGET,
       ...options,
     };
@@ -145,6 +152,10 @@ export class CodexWatcher {
    */
   reindexFromLog(): void {
     for (const event of this.options.log.replay()) {
+      if (event.kind === 'agent.started' && event.dedupeKey)
+        this.historicalStarts.add(`${event.sessionId}|${event.dedupeKey}`);
+      if (event.kind === 'agent.finished' && event.dedupeKey)
+        this.historicalFinishes.add(`${event.sessionId}|${event.agentId}|${event.dedupeKey}`);
       if (event.source !== 'codex-rollout') continue;
       this.seen(event.sessionId).add(signatureOf(event));
     }
@@ -177,7 +188,10 @@ export class CodexWatcher {
         let tail = this.tails.get(path);
         // Old history is not read — unless this watcher already follows the
         // file, whose next line would otherwise be lost.
-        if (!tail && stat.mtimeMs < cutoff) continue;
+        const old = stat.mtimeMs < cutoff;
+        const threadId =
+          /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(path)?.[1];
+        if (!tail && old && (!threadId || !this.options.knownThreadIds.has(threadId))) continue;
         // Replaced or truncated: start over. Signatures keep the log clean.
         if (!tail || tail.ino !== stat.ino || stat.size < tail.offset) {
           tail = {
@@ -186,13 +200,19 @@ export class CodexWatcher {
             partial: Buffer.alloc(0),
             identified: false,
             state: createThreadState(),
+            ...(old ? { backfillThrough: stat.size } : {}),
           };
           this.tails.set(path, tail);
         }
         if (stat.size === tail.offset) continue;
-        const want = Math.min(stat.size - tail.offset, budget);
+        const historical = tail.offset < (tail.backfillThrough ?? 0);
+        const want = Math.min(
+          stat.size - tail.offset,
+          budget,
+          historical ? tail.backfillThrough! - tail.offset : Infinity,
+        );
         budget -= want;
-        appended += this.readInto(path, tail, want);
+        appended += this.readInto(path, tail, want, historical);
       }
       return appended;
     } finally {
@@ -200,7 +220,7 @@ export class CodexWatcher {
     }
   }
 
-  private readInto(path: string, tail: Tail, length: number): number {
+  private readInto(path: string, tail: Tail, length: number, historical: boolean): number {
     const chunk = Buffer.alloc(length);
     let read: number;
     let fd: number | undefined;
@@ -245,10 +265,28 @@ export class CodexWatcher {
     if (events.length === 0) return 0;
 
     const seen = this.seen(tail.state.sessionId);
-    const fresh = events.filter((event) => !seen.has(signatureOf(event)));
+    const fresh = events.filter(
+      (event) =>
+        !seen.has(signatureOf(event)) &&
+        (!historical ||
+          event.kind === 'agent.instruction' ||
+          event.kind === 'usage.updated' ||
+          (event.kind === 'task.plan.updated' &&
+            this.options.knownThreadIds.has(tail.state.threadId) &&
+            this.options.knownThreadIds.has(event.sessionId)) ||
+          (event.kind === 'agent.finished' &&
+            this.historicalFinishes.has(
+              `${event.sessionId}|${event.agentId}|${event.dedupeKey ?? ''}`,
+            )) ||
+          (event.kind === 'agent.started' &&
+            this.historicalStarts.has(`${event.sessionId}|${event.dedupeKey ?? ''}`))),
+    );
     if (fresh.length === 0) return 0;
     for (const event of fresh) seen.add(signatureOf(event));
     const appended = this.options.log.appendMany(fresh);
+    for (const event of appended)
+      if (event.kind === 'agent.finished' && event.dedupeKey)
+        this.historicalFinishes.add(`${event.sessionId}|${event.agentId}|${event.dedupeKey}`);
     this.options.onEvents(appended);
     return appended.length;
   }

@@ -70,8 +70,10 @@ export const locateSession = (
 
   let lastModifiedMs = mainStat.mtimeMs;
   for (const sub of subagents) {
-    const stat = safeStat(sub.transcriptPath);
-    if (stat && stat.mtimeMs > lastModifiedMs) lastModifiedMs = stat.mtimeMs;
+    for (const path of [sub.transcriptPath, ...(sub.metaPath ? [sub.metaPath] : [])]) {
+      const stat = safeStat(path);
+      if (stat && stat.mtimeMs > lastModifiedMs) lastModifiedMs = stat.mtimeMs;
+    }
   }
 
   return { sessionId, projectSlug, mainPath, subagentsDir, subagents, lastModifiedMs };
@@ -93,6 +95,7 @@ export const locateSessions = (
   projectsDir: string,
   maxAgeMs?: number,
   ignoreSlugs: ReadonlySet<string> = new Set(),
+  knownSessionIds: ReadonlySet<string> = new Set(),
 ): LocatedSession[] => {
   if (!existsSync(projectsDir)) return [];
   const cutoff = maxAgeMs === undefined ? 0 : Date.now() - maxAgeMs;
@@ -109,7 +112,8 @@ export const locateSessions = (
     for (const entry of safeReaddir(dir)) {
       if (!entry.endsWith('.jsonl')) continue;
       const session = locateSession(projectsDir, slug, basename(entry, '.jsonl'));
-      if (session && session.lastModifiedMs >= cutoff) sessions.push(session);
+      if (session && (session.lastModifiedMs >= cutoff || knownSessionIds.has(session.sessionId)))
+        sessions.push(session);
     }
   }
 
@@ -125,5 +129,8 @@ export const fileSignature = (path: string): string => {
 export const sessionSignature = (session: LocatedSession): string =>
   [
     fileSignature(session.mainPath),
-    ...session.subagents.map((s) => `${s.agentId}=${fileSignature(s.transcriptPath)}`),
+    ...session.subagents.map(
+      (s) =>
+        `${s.agentId}=${fileSignature(s.transcriptPath)}:${s.metaPath ? fileSignature(s.metaPath) : 'missing-meta'}`,
+    ),
   ].join('|');

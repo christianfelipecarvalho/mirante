@@ -3,7 +3,7 @@ import { useFreshIds } from '../lib/fresh';
 import type { TimelineEntry, TimelineKind } from '@mirante/shared';
 import { formatClock } from '../lib/format';
 import { useI18n, type Translate } from '../lib/i18n';
-import { CATEGORY_ICON, toolCategory } from '../lib/tools';
+import { CATEGORY_COLOR, CATEGORY_ICON, toolCategory } from '../lib/tools';
 import { Icon, type IconName } from './Icon';
 
 const KIND_META: Record<TimelineKind, { icon: IconName; color: string }> = {
@@ -13,7 +13,7 @@ const KIND_META: Record<TimelineKind, { icon: IconName; color: string }> = {
   'handoff.end': { icon: 'back', color: 'var(--status-good)' },
   tool: { icon: 'dot', color: 'var(--text-muted)' },
   'tool.failed': { icon: 'cross', color: 'var(--status-critical)' },
-  skill: { icon: 'skill', color: 'var(--text-secondary)' },
+  skill: { icon: 'skill', color: 'var(--agent-5)' },
   compaction: { icon: 'compact', color: 'var(--status-serious)' },
   permission: { icon: 'alert', color: 'var(--status-warning)' },
   error: { icon: 'cross', color: 'var(--status-critical)' },
@@ -84,11 +84,11 @@ export const Timeline = ({ entries, sessionFilter }: TimelineProps) => {
 
   return (
     <aside
-      className="flex h-full min-h-0 flex-col rounded-xl border"
+      className="timeline-panel flex h-full min-h-0 flex-col rounded-xl border"
       style={{ background: 'var(--surface-2)', borderColor: 'var(--hairline)' }}
     >
-      <div className="border-b px-3 py-2" style={{ borderColor: 'var(--hairline)' }}>
-        <h2 className="text-[12px] font-semibold text-[var(--text-secondary)]">
+      <div className="border-b px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
+        <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
           {t('timeline.title')}
         </h2>
         <div className="mt-2 flex flex-wrap gap-1">
@@ -97,7 +97,8 @@ export const Timeline = ({ entries, sessionFilter }: TimelineProps) => {
               key={name}
               type="button"
               onClick={() => setGroup(name)}
-              className="rounded-full px-2 py-0.5 text-[10px] transition-colors"
+              aria-pressed={group === name}
+              className="timeline-filter pressable cursor-pointer rounded-md px-2 py-1 text-[11px] transition-colors"
               style={{
                 background: group === name ? 'var(--surface-1)' : 'transparent',
                 color: group === name ? 'var(--text-primary)' : 'var(--text-muted)',
@@ -126,18 +127,23 @@ export const Timeline = ({ entries, sessionFilter }: TimelineProps) => {
           return (
             <li
               key={`${entry.id}-${entry.kind}`}
-              className={`flex gap-2 rounded px-1 py-1 ${fresh.has(entry.id) ? 'motion-safe:arrive' : ''}`}
+              className={`timeline-row flex gap-2 rounded px-2 py-1 ${fresh.has(entry.id) ? 'motion-safe:arrive' : ''}`}
             >
               <span
                 className="mt-[2px] flex w-3.5 shrink-0 justify-center"
-                style={{ color: meta.color }}
+                style={{
+                  color:
+                    entry.kind === 'tool' && entry.subject
+                      ? CATEGORY_COLOR[toolCategory(entry.subject)]
+                      : meta.color,
+                }}
               >
                 <Icon name={icon} size={12} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-1.5">
                   <span
-                    className="min-w-0 truncate text-[11px] text-[var(--text-primary)]"
+                    className="min-w-0 truncate text-[12px] text-[var(--text-primary)]"
                     title={entry.text}
                   >
                     {rowText(entry, t)}
@@ -148,7 +154,7 @@ export const Timeline = ({ entries, sessionFilter }: TimelineProps) => {
                     </span>
                   )}
                 </div>
-                <div className="tabular text-[10px] text-[var(--text-muted)]">
+                <div className="tabular mt-0.5 text-[11px] text-[var(--text-muted)]">
                   {formatClock(entry.ts)} · {entry.agentType ?? entry.agentId}
                 </div>
               </div>

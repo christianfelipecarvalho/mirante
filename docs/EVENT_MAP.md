@@ -2,7 +2,56 @@
 
 How each raw source field becomes a normalized `MiranteEvent`, and **where the documentation and the observed behavior disagree**.
 
+The projector retains `agent.finished.outcome` (`ok`, `error`, or `interrupted`)
+and its scrubbed result preview.
+The recorded reply preserves paragraphs up to 64K characters, with
+`resultAvailability`, `resultTruncated`, and `resultCharCount` when known.
+Codex reads native `last_agent_message` from its terminal task event; Claude
+reads a completed Agent result, explicit notification result, terminal child
+reply, or SubagentStop's final assistant message. Intermediate prose and launch
+acknowledgements are not substituted for a return. Re-reading a previously
+known finish can enrich its content, but cannot stop a newer assignment or
+resume. The activity shows plain text with expandable long responses. `session.ended` closes unfinished execution
+without asserting task completion. New observed work clears old end/limit
+markers for that agent.
+
+Explicit recovery controls emit `agent.control.updated`: a run ID, verify/resume
+operation, queue/process acknowledgement, and optional completion verdict and
+scrubbed summary. Those events project into `BoardState.controlRuns` separately
+from observed cards. They do not create tasks or refresh their liveness. A CLI
+turn's successful exit alone never establishes completion of its original task.
+
 Observed against **Claude Code 2.1.272** on Linux. Transcripts inspected: 27 sessions with subagent directories. Re-verify after a Claude Code upgrade; `mirante doctor` reports schema drift.
+
+---
+
+## Work plans → execution progress
+
+`task.plan.updated` is a confirmed execution checklist, separate from the
+account allowance in `plan.usage.updated`. It carries a stable `planId`, optional
+native `scopeId`, source tool, completeness, and ordered steps with unique IDs,
+redacted text, and `pending`, `in_progress` or `completed` status. The card stores
+only the latest snapshot for its current assignment. Recorded steps have equal
+weight: percentage is the floor of completed / total × 100, available only for
+a complete nonempty snapshot. Expanded or reopened plans may decrease it.
+
+Codex captures a structured `update_plan` call after its paired native
+`Plan updated` result. The call retains its original agent and prompt scope;
+its confirmation supplies the native timestamp. Child `agent.started` events
+carry `assignmentId` so an old turn's late result cannot overwrite a new task.
+Claude captures `TodoWrite` after a successful paired transcript result or
+`PostToolUse`; `TaskCreate` / `TaskUpdate` build partial observations until a
+confirmed `TaskList` establishes list coverage. For children, explicit task
+ownership that cannot be safely matched to the caller keeps the snapshot
+partial; teammate names are not guessed to be agent IDs. The main agent may
+track the global plan. Native task shapes were checked
+against installed Claude Code 2.1.296 SDK tool types. Failed, pending, malformed,
+inherited, or oversized snapshots never manufacture completed work.
+
+These metadata events do not refresh agent liveness, reopen sessions, or assert
+a task outcome. Historical capture repairs are restricted to known sessions.
+New substantive requests clear the main agent's old plan; short continuation
+replies preserve it. New child assignments clear only that child's plan.
 
 ---
 
@@ -66,16 +115,16 @@ Defaults: 600 s for `command`/`http`/`mcp_tool`. Reduced to 30 s on `UserPromptS
 
 Per-entry fields: `uuid`, `parentUuid`, `type`, `timestamp`, `sessionId`, `cwd`, `gitBranch`, `version`, `userType`, **`entrypoint`**, `promptId`, `isSidechain`.
 
-| Field                                         | Use                                                                                                                                                                                                                         |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `entrypoint`                                  | Distinguishes `claude-vscode` from the CLI. Satisfies the "terminal and VS Code in separate lanes" requirement directly.                                                                                                    |
-| `attributionSkill`                            | Active skill name on the entry. Used for the skill badge — no need to infer it from a `Skill` tool-use block.                                                                                                               |
-| `attributionAgent`                            | Present on subagent entries.                                                                                                                                                                                                |
-| `message.usage`                               | Token accounting. See §4.                                                                                                                                                                                                   |
-| `toolUseResult`                               | Structured tool result; the `Agent` variant is the handoff record. See §3.                                                                                                                                                  |
-| `sourceToolUseID` / `sourceToolAssistantUUID` | Links a result entry back to the tool-use block that produced it.                                                                                                                                                           |
-| `message.content[].text`                      | What the agent wrote between its tool calls → `agent.said`. One event per passage, keyed by the entry `uuid` plus the block index, truncated to 400 characters and scrubbed at ingest.                                      |
-| `toolUseResult.prompt` (`Agent` calls)        | The brief the parent wrote → `agent.started.brief`, kept to 700 characters with its paragraphs, plus `briefCharCount` so the card can say how much it is not showing. Also present as the tool-use `input.prompt`. See D13. |
+| Field                                         | Use                                                                                                                                                                                                                                                                         |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `entrypoint`                                  | Distinguishes `claude-vscode` from the CLI. Satisfies the "terminal and VS Code in separate lanes" requirement directly.                                                                                                                                                    |
+| `attributionSkill`                            | Active skill name on the entry. Used for the skill badge — no need to infer it from a `Skill` tool-use block.                                                                                                                                                               |
+| `attributionAgent`                            | Present on subagent entries.                                                                                                                                                                                                                                                |
+| `message.usage`                               | Token accounting. See §4.                                                                                                                                                                                                                                                   |
+| `toolUseResult`                               | Structured tool result; the `Agent` variant is the handoff record. See §3.                                                                                                                                                                                                  |
+| `sourceToolUseID` / `sourceToolAssistantUUID` | Links a result entry back to the tool-use block that produced it.                                                                                                                                                                                                           |
+| `message.content[].text`                      | What the agent wrote between its tool calls → `agent.said`. One event per passage, keyed by the entry `uuid` plus the block index, truncated to 400 characters and scrubbed at ingest.                                                                                      |
+| `toolUseResult.prompt` (`Agent` calls)        | The brief the parent wrote → `agent.started.brief`, kept up to 64K characters with paragraphs/indentation, plus `briefCharCount`, `briefTruncated`, and `briefAvailability` for explicit availability and truncation. Also present as the tool-use `input.prompt`. See D13. |
 
 Assistant content block types observed: `text`, `thinking`, `tool_use`. The
 `thinking` block is present but **empty**: it carries `thinking: ""` and a
@@ -153,7 +202,31 @@ Related result shapes observed: `{ resumedAgentId, success, message, pin }` for 
 
 **`iterations[]` is a breakdown of the same totals, not additional usage. Summing it double-counts.** Only top-level fields are summed.
 
-Session total = Σ top-level `message.usage` over assistant entries in the main transcript **plus** every `agent-*.jsonl` of that session. This is the definition used for M1 acceptance criterion 4.
+Session total = Σ the latest top-level `message.usage` per response (`message.id`),
+scoped to its session and agent, across the main transcript and every
+`agent-*.jsonl` of that session. Claude can write several assistant blocks with
+different entry UUIDs for the same response, including growing output counters.
+Those are replacement snapshots, not separate charges. Without a response ID,
+the entry UUID identifies the reading. Thinking tokens are an output breakdown
+and are not added again.
+
+`usage.updated` carries `responseId` and `replacesUsageKeys` for these snapshots.
+The shared token ledger applies their signed difference and retires the old
+per-entry charges, allowing an append-only repair of already recorded history.
+Board totals and turn totals use the same ledger. Replays and unchanged rereads
+do not charge a response twice.
+
+Session cost is a separately reported cumulative USD snapshot. In addition to
+the status line, Claude transcripts expose `cost-state.totalCostUSD` and
+`system/local_command.usageReport.session.total_cost_usd`. A cost-state without
+a timestamp uses the last preceding dated entry; the reread clock is never used
+as its measurement date. The latest dated cost reading replaces the previous
+one rather than being added to it. Missing monetary readings remain unknown;
+Codex token records do not imply a dollar cost or subscription balance.
+
+The header shows exact token integers and four to six USD decimals so small
+arrivals remain visible. Its disclosure states the session scope, cost coverage,
+and separate token/cost measurement dates.
 
 ---
 
@@ -362,6 +435,44 @@ Files live at `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<local time>-<threadId>.j
 thread, in the directory of the day the thread started. Each line is
 `{ timestamp, [ordinal], type, payload }`. Only these files are read; `auth.json` beside them
 never is.
+
+### Delegated instructions and historical repair
+
+`agent.started.brief` carries the redacted initial or follow-up assignment. Claude
+Code reads the fullest nonempty `Agent`/legacy `Task` input/result prompt and uses
+the child's first non-injected user entry as a fallback. Sidechain assignments
+are not human `prompt.submitted` events and do not share prompt dedupe identities
+with the parent or siblings. `SendMessage` content is emitted as
+`agent.instruction`; metadata can refine a named recipient without creating a
+second delivery. Unknown senders/recipients remain explicitly unidentified.
+
+Codex `response_item/agent_message` records include readable delivered text even
+when collaboration tool arguments are encrypted. `NEW_TASK` enriches the matching
+assignment using its original start timestamp and dedupe key; `MESSAGE` records
+become `agent.instruction`. `FINAL_ANSWER` remains a return. Inherited fork history
+is excluded before this mapping. No ciphertext is displayed as instruction text.
+
+Instruction bodies are scrubbed before SQLite, preserve whitespace, and have a
+64K-character ceiling. Availability distinguishes captured, encrypted, and missing
+records. Activity readers accept richer same-source re-reads and carry the latest
+assignment into a selected child's separate native turn. A selected finished
+child does not inherit the parent's live status.
+
+The PT/EN display translation is a derived view of this preserved text. An
+authenticated same-origin `POST /api/instructions/translate` accepts a 64K body
+and target `pt` or `en`. It detects the prose language and translates only when
+needed, preserving technical spans and whitespace. A serial CPU worker loads
+explicitly installed Marian q8 models with remote loading and network access
+disabled. The cache is bounded and memory-only. Translation never changes an
+event, assignment, recovery instruction, or the message sent to an agent.
+Unknown language and unavailable/failed translation are explicit display states.
+
+On startup the watchers receive session/thread IDs already in the replayed board.
+Older matching files can repair known `agent.started` and `usage.updated` records
+and add instruction messages; they do not import unrelated old sessions or
+replay tools and lifecycle events. Corrections never count another child or revive a finished run,
+and older assignments cannot replace a newer task on a card. Unchanged restarts
+remain idempotent.
 
 ### Identity
 

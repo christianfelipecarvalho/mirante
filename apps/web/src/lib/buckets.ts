@@ -1,4 +1,4 @@
-import type { AgentCard } from '@mirante/shared';
+import { completionOf, type AgentCard } from '@mirante/shared';
 import { livenessOf } from './liveness.js';
 
 /**
@@ -26,14 +26,20 @@ const rank = (bucket: AgentBucket): number => BUCKET_ORDER.indexOf(bucket);
 
 export const bucketOf = (card: AgentCard, now: number, sessionEnded = false): AgentBucket => {
   const state = card.status.state;
+  const completion = completionOf(card);
   if (state === 'waiting_approval' || state === 'waiting_input') return 'needs_you';
   // A plan limit stopped it; nothing broke. It keeps a card, because the work
   // can be run again the moment the window reopens.
-  if (state === 'rate_limited' || (state === 'error' && card.stoppedAtLimit)) return 'stopped';
-  if (state === 'error') return 'failed';
-  if (state === 'done' || card.endedAt !== undefined) return 'finished';
-  // A session that closed took its agents with it, whatever they last claimed.
-  if (sessionEnded) return 'finished';
+  if (
+    state === 'rate_limited' ||
+    completion === 'interrupted' ||
+    (state === 'error' && card.stoppedAtLimit)
+  )
+    return 'stopped';
+  if (completion === 'failed') return 'failed';
+  if (completion === 'completed') return 'finished';
+  // Closing a session proves execution ended, not that its assignment finished.
+  if (completion === 'unknown' || sessionEnded) return 'no_signal';
   // Claims to be working, has not been heard from in half an hour. This is not
   // a state the agent reported — it is the board declining to repeat a claim it
   // can no longer support. See lib/liveness.

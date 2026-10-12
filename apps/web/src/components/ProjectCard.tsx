@@ -86,7 +86,7 @@ export const ProjectCard = ({
   return (
     <section
       aria-labelledby={titleId}
-      className="glow-card glow-quiet group/project relative rounded-xl border p-4"
+      className="project-card glow-card glow-quiet group/project relative rounded-xl border p-4"
       data-life={
         group.activity === 'needs_you' ? 'waiting' : summary.running > 0 ? 'working' : 'rest'
       }
@@ -197,7 +197,11 @@ const Emphasis = ({ text }: { text: string }) => {
 
 const Line = ({ icon, children }: { icon: 'agents' | 'skill'; children: ReactNode }) => (
   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[var(--text-secondary)]">
-    <span aria-hidden="true" className="flex w-3 justify-center text-[var(--text-muted)]">
+    <span
+      aria-hidden="true"
+      className="flex w-3 justify-center"
+      style={{ color: icon === 'skill' ? 'var(--agent-5)' : 'var(--accent)' }}
+    >
       <Icon name={icon} size={13} />
     </span>
     {children}
@@ -265,7 +269,7 @@ const SkillsLine = ({ summary }: { summary: ProjectSummary }) => {
               : t('project.skills', { n: count })
         }
       />
-      {shown.map((skill, index) => (
+      {shown.map((skill) => (
         <span
           key={skill.name}
           title={
@@ -273,8 +277,8 @@ const SkillsLine = ({ summary }: { summary: ProjectSummary }) => {
               ? t('project.skillAgents.one')
               : t('project.skillAgents', { n: skill.agents })
           }
-          // Two names on a phone, three where there is room.
-          className={`${index === SKILLS_SHOWN - 1 && !all ? 'hidden md:inline-block' : 'inline-block'} max-w-[22ch] truncate rounded px-1.5 py-0.5 text-[11px]`}
+          // Names wrap on a phone; every skill counted remains reachable.
+          className="inline-block max-w-[22ch] truncate rounded px-1.5 py-0.5 text-[11px]"
           style={{ background: 'var(--surface-1)', color: 'var(--text-secondary)' }}
         >
           {skill.name}
@@ -333,7 +337,7 @@ const AwaitedRow = ({
   const { t } = useI18n();
   return (
     <div
-      className="mt-3 flex flex-wrap items-start gap-x-3 gap-y-2 rounded border-l-2 px-3 py-2"
+      className="mt-3 flex flex-wrap items-start gap-x-3 gap-y-2 rounded border-l px-3 py-2"
       style={{ borderColor: 'var(--status-warning)', background: 'var(--surface-1)' }}
     >
       <span className="mt-0.5" style={{ color: 'var(--status-warning)' }} aria-hidden="true">
@@ -373,7 +377,7 @@ const LimitRow = ({ awaited, now }: { awaited: Awaited; now: number }) => {
   const { t } = useI18n();
   return (
     <div
-      className="mt-3 flex items-start gap-3 rounded border-l-2 px-3 py-2"
+      className="mt-3 flex items-start gap-3 rounded border-l px-3 py-2"
       style={{ borderColor: 'var(--status-serious)', background: 'var(--surface-1)' }}
     >
       <span className="mt-0.5" style={{ color: 'var(--status-serious)' }} aria-hidden="true">

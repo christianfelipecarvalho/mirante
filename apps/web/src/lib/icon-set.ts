@@ -5,6 +5,9 @@
  * import a React component to do it.
  */
 export type IconName =
+  | 'plus'
+  | 'minus'
+  | 'fit'
   | 'terminal'
   | 'speech'
   | 'file'
@@ -53,6 +56,9 @@ export type IconName =
   | 'agents';
 
 export const ICON_PATHS: Record<IconName, string> = {
+  plus: 'M12 5v14M5 12h14',
+  minus: 'M5 12h14',
+  fit: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',
   terminal: 'M5 7l4 4-4 4M12 16h7',
   file: 'M7 3h7l5 5v13H7zM14 3v5h5',
   pencil: 'M4 20h4l11-11a2.1 2.1 0 0 0-3-3L5 17z',

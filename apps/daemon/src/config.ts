@@ -7,6 +7,8 @@ export type MiranteConfig = {
   /** Where Mirante keeps its own data. Nothing here is ever sent anywhere. */
   home: string;
   databasePath: string;
+  /** Preinstalled local translation models; runtime never downloads them. */
+  translationModelDir: string;
   tokenPath: string;
   /** Written while the daemon is listening, so a later run can take the port over. */
   pidPath: string;
@@ -84,6 +86,10 @@ export const loadConfig = (overrides: Partial<MiranteConfig> = {}): MiranteConfi
   return {
     home,
     databasePath: overrides.databasePath ?? join(home, 'mirante.db'),
+    translationModelDir:
+      overrides.translationModelDir ??
+      process.env.MIRANTE_TRANSLATION_MODEL_DIR ??
+      join(home, 'translations', 'models'),
     tokenPath: overrides.tokenPath ?? join(home, 'token'),
     pidPath: overrides.pidPath ?? join(home, 'daemon.pid'),
     // Not configurable by environment on purpose. See ADR-0005.

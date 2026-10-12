@@ -37,7 +37,7 @@ export const BoardSummary = ({
 
   return (
     <div
-      className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-[var(--text-secondary)]"
+      className="board-summary flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-[var(--text-secondary)]"
       aria-label={t('summary.label')}
       role="group"
     >
@@ -53,7 +53,7 @@ export const BoardSummary = ({
 
       {summary.skills > 0 && (
         <span className="flex items-center gap-1.5">
-          <span aria-hidden="true" className="text-[var(--text-muted)]">
+          <span aria-hidden="true" className="text-[var(--agent-5)]">
             <Icon name="skill" size={12} />
           </span>
           {summary.skills === 1

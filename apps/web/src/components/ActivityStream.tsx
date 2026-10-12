@@ -4,13 +4,16 @@ import { useFreshIds } from '../lib/fresh';
 import { groupStepsByTurn, type Step, type StepKind, type StepStatus } from '../lib/steps';
 import { formatClock, formatResetClock, formatSpan, formatWhen } from '../lib/format';
 import { useI18n, type Translate } from '../lib/i18n';
-import { CATEGORY_ICON, describeTool, isPlumbing } from '../lib/tools';
+import { CATEGORY_COLOR, CATEGORY_ICON, describeTool, isPlumbing } from '../lib/tools';
 import { waitingText } from './AgentCard';
 import { Icon, type IconName } from './Icon';
 import { StateBadge } from './StateBadge';
+import { InstructionText } from './InstructionText';
+import { InstructionPreview } from './InstructionPreview';
 
 const NON_TOOL_ICON: Record<Exclude<StepKind, 'tool'>, IconName> = {
   prompt: 'prompt',
+  instruction: 'handoff',
   said: 'speech',
   agent: 'handoff',
   skill: 'skill',
@@ -98,6 +101,7 @@ export type ActivityStreamProps = {
   liveStatus?: CardStatus | undefined;
   /** An agent filter is on: a turn with nothing by that agent is left out. */
   hideEmpty?: boolean;
+  selectedAgentId?: string;
 };
 
 const ONGOING = new Set([
@@ -124,11 +128,15 @@ export const ActivityStream = ({
   nameOf,
   liveStatus,
   hideEmpty = false,
+  selectedAgentId,
 }: ActivityStreamProps) => {
   const { t } = useI18n();
   const groups = useMemo(
-    () => groupStepsByTurn(steps).filter((group) => !hideEmpty || group.steps.length > 0),
-    [steps, hideEmpty],
+    () =>
+      groupStepsByTurn(steps, selectedAgentId).filter(
+        (group) => !hideEmpty || group.steps.length > 0,
+      ),
+    [steps, hideEmpty, selectedAgentId],
   );
   const ids = useMemo(() => steps.map((step) => step.id), [steps]);
   const fresh = useFreshIds(ids);
@@ -214,21 +222,27 @@ export const ActivityStream = ({
                 <span className="tabular shrink-0 text-[11px] text-[var(--text-muted)]">
                   {formatWhen(group.startedAt)}
                 </span>
-                {group.prompt ? (
+                {group.prompt || group.instruction?.detail ? (
                   <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--text-primary)]">
-                    “{group.prompt}”
+                    {group.prompt ? (
+                      `“${group.prompt}”`
+                    ) : (
+                      <InstructionPreview text={group.instruction!.detail!} />
+                    )}
                   </span>
                 ) : (
                   <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--text-muted)]">
                     {group.origin === 'agent'
                       ? t('turn.fromAgent')
-                      : group.origin === 'system'
-                        ? t('turn.fromSystem')
-                        : t('turn.noPrompt')}
+                      : group.origin === 'delegation'
+                        ? t('turn.fromDelegation')
+                        : group.origin === 'system'
+                          ? t('turn.fromSystem')
+                          : t('turn.noPrompt')}
                   </span>
                 )}
                 {ongoing && liveStatus ? (
-                  <span className="flex shrink-0 items-center gap-2">
+                  <span className="activity-group-status flex shrink-0 items-center gap-2">
                     <StateBadge status={liveStatus} />
                     {liveStatus.waitingOn && (
                       <span className="max-w-[16rem] truncate text-[11px] text-[var(--text-secondary)]">
@@ -264,6 +278,10 @@ export const ActivityStream = ({
             </h3>
             {expanded && (
               <ol id={panel} className="px-1.5 pb-1.5">
+                {group.instruction &&
+                  !group.steps.some(
+                    (step) => step.kind === 'instruction' && step.id === group.instruction?.id,
+                  ) && <InstructionRow step={group.instruction} nameOf={nameOf} context />}
                 {group.steps.map((step) => (
                   <Row
                     key={`${step.id}-${step.kind}-${step.title}`}
@@ -297,6 +315,17 @@ const Row = ({
   fresh: boolean;
 }) => {
   const { t } = useI18n();
+  if (step.kind === 'instruction') return <InstructionRow step={step} nameOf={nameOf} />;
+  if (step.kind === 'agent' && step.verb === 'returned')
+    return (
+      <ReturnedRow
+        step={step}
+        showAgent={showAgent}
+        colorOf={colorOf}
+        nameOf={nameOf}
+        fresh={fresh}
+      />
+    );
   const isTool = step.kind === 'tool';
   const described = isTool ? describeTool(step.title, step.detail) : undefined;
   const error = step.kind === 'error' ? errorWording(step, t, Date.now()) : undefined;
@@ -341,7 +370,7 @@ const Row = ({
 
   return (
     <li
-      className={`grid grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] gap-x-2.5 rounded px-2 py-[5px] text-[12px] transition-colors hover:bg-[var(--surface-1)] ${isSaid ? 'items-start' : 'items-baseline'} ${fresh ? 'motion-safe:arrive' : ''}`}
+      className={`activity-row grid grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] gap-x-2.5 rounded px-2 py-[5px] text-[12px] transition-colors hover:bg-[var(--surface-1)] ${isSaid ? 'items-start' : 'items-baseline'} ${fresh ? 'motion-safe:arrive' : ''}`}
       style={{ opacity: recessive ? 0.55 : 1 }}
     >
       <span className="tabular text-[10px] text-[var(--text-muted)]">{formatClock(step.ts)}</span>
@@ -350,14 +379,21 @@ const Row = ({
           its own is a project waiting on you. */}
       <span
         className="flex w-3.5 justify-center self-center"
-        style={{ color: STATUS_COLOR[step.status] }}
+        style={{
+          color:
+            described && step.status !== 'failed' && step.status !== 'limited'
+              ? CATEGORY_COLOR[described.category]
+              : step.kind === 'skill' && step.status !== 'failed' && step.status !== 'limited'
+                ? 'var(--agent-5)'
+                : STATUS_COLOR[step.status],
+        }}
       >
         <Icon name={icon} size={13} />
       </span>
 
       {showAgent ? (
         <span
-          className="max-w-[9rem] truncate text-[10px]"
+          className="activity-agent max-w-[9rem] truncate text-[10px]"
           style={{ color: colorOf?.(step.agentId) ?? 'var(--text-muted)' }}
         >
           {nameOf?.(step.agentId) ??
@@ -369,7 +405,7 @@ const Row = ({
         <span />
       )}
 
-      <span className="flex min-w-0 items-baseline gap-2">
+      <span className="activity-message flex min-w-0 items-baseline gap-2">
         {label && (
           <span
             className="shrink-0 font-semibold"
@@ -411,6 +447,166 @@ const Row = ({
       <span className="tabular text-[10px] text-[var(--text-muted)]">
         {formatElapsed(step.durationMs)}
       </span>
+    </li>
+  );
+};
+
+const InstructionRow = ({
+  step,
+  nameOf,
+  context = false,
+}: {
+  step: Step;
+  nameOf?: ((agentId: string) => string | undefined) | undefined;
+  context?: boolean;
+}) => {
+  const { t } = useI18n();
+  const name = (id: string | undefined, fallback: string) =>
+    id ? (nameOf?.(id) ?? (id === 'main' ? t('card.mainSession') : id)) : fallback;
+  const instruction = step.instruction;
+  const sender = name(instruction?.senderAgentId, t('instruction.unknownSender'));
+  const recipient =
+    instruction?.instructionType === 'broadcast'
+      ? t('instruction.team')
+      : name(instruction?.recipientAgentId, t('instruction.unknownRecipient'));
+  return (
+    <li className="min-w-0 px-2 py-2 text-[12px]">
+      <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--text-secondary)]">
+        <span className="tabular text-[10px] text-[var(--text-muted)]">{formatClock(step.ts)}</span>
+        <Icon name="handoff" size={13} className="text-[var(--accent)]" />
+        <span className="font-medium text-[var(--text-primary)] [overflow-wrap:anywhere]">
+          {t(context ? 'instruction.contextRoute' : 'instruction.route', { sender, recipient })}
+        </span>
+      </div>
+      <InstructionText
+        text={step.detail}
+        availability={instruction?.availability}
+        charCount={instruction?.charCount}
+        truncated={instruction?.truncated}
+      />
+    </li>
+  );
+};
+
+/** Returned text is evidence from the finish event, not a reconstructed reply. */
+const ReturnedRow = ({
+  step,
+  showAgent,
+  colorOf,
+  nameOf,
+  fresh,
+}: {
+  step: Step;
+  showAgent: boolean;
+  colorOf?: (agentId: string) => string;
+  nameOf?: (agentId: string) => string | undefined;
+  fresh: boolean;
+}) => {
+  const { t } = useI18n();
+  const text =
+    step.result?.availability !== 'encrypted' && step.detail?.trim() ? step.detail : undefined;
+  const previewNote =
+    step.result?.truncated === true
+      ? t('activity.responseTruncated')
+      : step.result?.truncated === undefined
+        ? t('activity.responsePreview')
+        : undefined;
+  const long = Boolean(text && (text.length > 280 || text.split('\n').length > 4));
+  const name =
+    nameOf?.(step.agentId) ??
+    (step.agentId === 'main' ? t('card.mainSession') : (step.agentType ?? step.title));
+  return (
+    <li
+      className={`min-w-0 rounded px-2 py-2 text-[12px] hover:bg-[var(--surface-1)] ${fresh ? 'motion-safe:arrive' : ''}`}
+    >
+      <div className="mb-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <span className="tabular text-[10px] text-[var(--text-muted)]">{formatClock(step.ts)}</span>
+        <span className="self-center" style={{ color: STATUS_COLOR[step.status] }}>
+          <Icon name={step.returnOutcome === 'interrupted' ? 'pause' : 'handoff'} size={13} />
+        </span>
+        <span
+          className="font-semibold"
+          style={{
+            color:
+              step.status === 'failed' || step.status === 'limited'
+                ? STATUS_COLOR[step.status]
+                : 'var(--text-primary)',
+          }}
+        >
+          {t('activity.returned')}
+        </span>
+        <span
+          className="min-w-0 text-[11px] [overflow-wrap:anywhere]"
+          style={{
+            color: showAgent
+              ? (colorOf?.(step.agentId) ?? 'var(--text-secondary)')
+              : 'var(--text-secondary)',
+          }}
+        >
+          {name}
+        </span>
+        {step.returnOutcome === 'interrupted' && (
+          <span className="text-[11px] text-[var(--status-serious)]">{t('state.interrupted')}</span>
+        )}
+        {step.returnOutcome === 'error' && (
+          <span className="text-[11px] text-[var(--status-critical)]">{t('state.error')}</span>
+        )}
+        <span className="tabular ml-auto text-[10px] text-[var(--text-muted)]">
+          {formatElapsed(step.durationMs)}
+        </span>
+      </div>
+      {!text ? (
+        <p className="py-1 text-[11px] text-[var(--text-secondary)]">
+          {t(
+            step.result?.availability === 'encrypted'
+              ? 'activity.responseEncrypted'
+              : 'activity.responseMissing',
+          )}
+        </p>
+      ) : (
+        <>
+          {long ? (
+            <details className="group min-w-0">
+              <summary className="pressable min-h-11 cursor-pointer list-none rounded py-2 text-[var(--text-primary)] [&::-webkit-details-marker]:hidden">
+                <span className="line-clamp-2 whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere] group-open:hidden">
+                  {text}
+                </span>
+                <span className="flex items-center gap-1 py-1 text-[11px] text-[var(--accent)]">
+                  <Icon name="disclose" size={12} />
+                  <span className="group-open:hidden">{t('activity.readResponse')}</span>
+                  <span className="hidden group-open:inline">{t('activity.closeResponse')}</span>
+                </span>
+              </summary>
+              <div
+                role="region"
+                aria-label={t('activity.response')}
+                tabIndex={0}
+                className="max-h-[min(55vh,36rem)] max-w-[75ch] overflow-y-auto rounded pr-2 outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+              >
+                <blockquote className="whitespace-pre-wrap text-[12px] leading-relaxed text-[var(--text-primary)] [overflow-wrap:anywhere]">
+                  {text}
+                </blockquote>
+              </div>
+              {previewNote && (
+                <p className="mt-2 text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                  {previewNote}
+                </p>
+              )}
+            </details>
+          ) : (
+            <>
+              <p className="max-w-[75ch] whitespace-pre-wrap leading-relaxed text-[var(--text-primary)] [overflow-wrap:anywhere]">
+                {text}
+              </p>
+              {previewNote && (
+                <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">
+                  {previewNote}
+                </p>
+              )}
+            </>
+          )}
+        </>
+      )}
     </li>
   );
 };

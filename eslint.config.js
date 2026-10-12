@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/coverage/**',
       '**/node_modules/**',
       'tests/fixtures/**',
+      '.agents/skills/**',
     ],
   },
   js.configs.recommended,

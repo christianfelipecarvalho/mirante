@@ -1,5 +1,12 @@
 import type { MiranteEvent, PlanUsage, TokenUsage } from '@mirante/shared';
-import { MAIN_AGENT_ID, addTokenUsage, emptyTokenUsage, requestText } from '@mirante/shared';
+import {
+  MAIN_AGENT_ID,
+  TokenLedger,
+  addTokenUsage,
+  emptyTokenUsage,
+  isTaskContinuation as isFollowUp,
+  requestText,
+} from '@mirante/shared';
 
 /**
  * One request: everything that happened because a person asked for something.
@@ -43,6 +50,7 @@ export const buildTurns = (events: MiranteEvent[], sessionId: string): Turn[] =>
     .filter((event) => event.sessionId === sessionId)
     .sort((a, b) => a.ts.localeCompare(b.ts) || a.id - b.id);
   const turns = new Map<string, Turn>();
+  const usage = new TokenLedger();
 
   const ensure = (event: MiranteEvent): Turn => {
     const key = event.promptId ?? UNATTRIBUTED;
@@ -104,7 +112,7 @@ export const buildTurns = (events: MiranteEvent[], sessionId: string): Turn[] =>
         break;
       case 'usage.updated':
         if (event.payload.scope === 'agent') {
-          turn.tokens = addTokenUsage(turn.tokens, event.payload.tokens);
+          turn.tokens = addTokenUsage(turn.tokens, usage.apply(event));
         } else if (event.payload.costUsd !== undefined) {
           sessionCost = event.payload.costUsd;
           const baseline = costAtStart.get(key);
@@ -149,61 +157,8 @@ export const latestTurn = (
   return turn ? { turn, sessionId: last.sessionId } : undefined;
 };
 
-/**
- * Replies that only keep the work going, compared after lowercasing and
- * stripping accents and punctuation.
- *
- * A closed list rather than a length rule: "fix the build" is short and is a
- * request, and a length rule would hide it. Missing a follow-up costs nothing
- * worse than today's behaviour; hiding a request would.
- */
-const FOLLOW_UPS = new Set([
-  'continue',
-  'continua',
-  'go on',
-  'go ahead',
-  'proceed',
-  'keep going',
-  'yes',
-  'y',
-  'ok',
-  'okay',
-  'sure',
-  'do it',
-  'sim',
-  's',
-  'pode',
-  'pode seguir',
-  'pode continuar',
-  'pode fazer',
-  'pode comecar',
-  'segue',
-  'siga',
-  'prossiga',
-  'isso',
-  'bora',
-  'perfeito',
-  'certo',
-  'beleza',
-  'faca isso',
-]);
-
-const normalize = (text: string): string =>
-  text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-export const isFollowUp = (text: string): boolean => {
-  const trimmed = text.trim();
-  if (trimmed.length === 0 || trimmed.length > 24) return false;
-  // Punctuation alone — the "." typed to wake a terminal — asks for nothing.
-  if (!/[\p{L}\p{N}]/u.test(trimmed)) return true;
-  return FOLLOW_UPS.has(normalize(trimmed));
-};
+/** Shared with checklist scoping so approvals preserve the current request. */
+export { isTaskContinuation as isFollowUp } from '@mirante/shared';
 
 export type LatestRequest = {
   sessionId: string;

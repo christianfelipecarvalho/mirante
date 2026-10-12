@@ -7,3 +7,7 @@ packages:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+  # CPU inference binaries are already bundled; its script downloads unused CUDA.
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false

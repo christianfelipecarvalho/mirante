@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { BoardProjector, emptyBoard, type BoardState, type MiranteEvent } from '@mirante/shared';
+import {
+  BoardProjector,
+  emptyBoard,
+  type AgentControlResult,
+  type BoardState,
+  type MiranteEvent,
+} from '@mirante/shared';
 import type { AgentDefinition } from './agents';
 import { collectEventPages, type EventPage } from './event-pages';
 
@@ -53,6 +59,11 @@ export type BoardClient = {
    * This also allows an immediate reading; its age stays visible in between.
    */
   refreshPlanUsage: () => Promise<PlanUsageRefresh>;
+  controlAgents: (
+    sessionId: string,
+    action: 'verify' | 'resume' | 'stop',
+    ids: string[],
+  ) => Promise<AgentControlResult>;
 };
 
 export type PlanUsageRefresh =
@@ -103,7 +114,8 @@ export const useBoard = (): BoardClient => {
     const applyEvents = (incoming: MiranteEvent[]) => {
       if (incoming.length === 0) return;
       const projector = projectorRef.current;
-      const fresh = incoming.filter((event) => event.id > projector.snapshot().lastEventId);
+      const lastEventId = projector.snapshot().lastEventId;
+      const fresh = incoming.filter((event) => event.id > lastEventId);
       if (fresh.length === 0) return;
       for (const event of fresh) projector.apply(event);
       setBoard(projector.snapshot());
@@ -201,10 +213,9 @@ export const useBoard = (): BoardClient => {
           buffered = [...buffered, ...data.events];
           return;
         }
-        const next = data.events.find(
-          (event) => event.id > projectorRef.current.snapshot().lastEventId,
-        );
-        if (next && next.id > projectorRef.current.snapshot().lastEventId + 1) {
+        const lastEventId = projectorRef.current.snapshot().lastEventId;
+        const next = data.events.find((event) => event.id > lastEventId);
+        if (next && next.id > lastEventId + 1) {
           buffered = [...buffered, ...data.events];
           void recoverGap();
           return;
@@ -254,5 +265,28 @@ export const useBoard = (): BoardClient => {
     }
   };
 
-  return { board, events, definitions, connection, decide, refreshPlanUsage };
+  const controlAgents: BoardClient['controlAgents'] = async (sessionId, action, ids) => {
+    try {
+      const response = await fetch(
+        `/api/sessions/${encodeURIComponent(sessionId)}/agents/control`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${tokenRef.current}`,
+          },
+          body: JSON.stringify(
+            action === 'stop' ? { action, runIds: ids } : { action, agentIds: ids },
+          ),
+        },
+      );
+      if (response.status !== 202 && response.status !== 409)
+        return { ok: false, reason: 'unreachable' };
+      return (await response.json()) as AgentControlResult;
+    } catch {
+      return { ok: false, reason: 'unreachable' };
+    }
+  };
+
+  return { board, events, definitions, connection, decide, refreshPlanUsage, controlAgents };
 };

@@ -120,17 +120,22 @@ describe('recovery export', () => {
       card('main', 'idle'),
       {
         ...card('child', 'done'),
+        outcome: 'ok',
         task: 'Check the build',
         brief: 'Review the frontend build',
         parentAgentId: 'main',
       },
       card('failed', 'error'),
+      { ...card('interrupted', 'done'), outcome: 'interrupted' },
+      card('unconfirmed', 'done'),
     ];
     const checkpoint = budgetCheckpoint(state, 'claude-code', NOW);
     expect(checkpoint.executionPaused).toBe(false);
     expect(checkpoint.sessions[0]?.agents.map((agent) => agent.completion)).toEqual([
       'unconfirmed',
       'reported_done',
+      'unconfirmed',
+      'unconfirmed',
       'unconfirmed',
     ]);
     expect(checkpoint.sessions[0]?.agents[1]).toMatchObject({

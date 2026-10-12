@@ -13,7 +13,10 @@ export const dedupeKeys = {
   toolStarted: (toolUseId: string) => `tool.started:${toolUseId}`,
   toolFinished: (toolUseId: string) => `tool.finished:${toolUseId}`,
   toolFailed: (toolUseId: string) => `tool.failed:${toolUseId}`,
+  taskPlan: (callId: string, agentId: string) => `task.plan.updated:${agentId}:${callId}`,
   agentStarted: (agentId: string) => `agent.started:${agentId}`,
+  agentInstruction: (callId: string, recipientAgentId?: string) =>
+    `agent.instruction:${callId}:${recipientAgentId ?? '*'}`,
   /** A later assignment to the same agent. Its own fact, so it is not folded into the first. */
   agentFollowUp: (agentId: string, runId: string) => `agent.started:${agentId}:${runId}`,
   agentFollowUpFinished: (agentId: string, runId: string) => `agent.finished:${agentId}:${runId}`,
@@ -92,6 +95,13 @@ export const dedupeKeyOf = (event: DraftEvent | MiranteEvent): string | undefine
  * kinds a second report would double a count; for these it only refines what is
  * already on the card, so both the watcher and the projector let it through.
  * The projector's own counting guard is what keeps a re-read from inflating a
- * parent's running children.
+ * parent's running children. Usage snapshots are reconciled by TokenLedger,
+ * whose signed delta replaces prior counters instead of charging them again.
  */
-export const REREADABLE_KINDS: ReadonlySet<MiranteEvent['kind']> = new Set(['agent.started']);
+export const REREADABLE_KINDS: ReadonlySet<MiranteEvent['kind']> = new Set([
+  'agent.started',
+  'agent.instruction',
+  'agent.finished',
+  'usage.updated',
+  'task.plan.updated',
+]);

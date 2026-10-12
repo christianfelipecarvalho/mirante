@@ -78,9 +78,23 @@ await build({
 });
 await chmod(join(out, 'dist', 'bin.js'), 0o755);
 
+// Keep CPU translation off the observer's event loop. Its URL is relative to
+// this bundle at runtime, so stage the worker beside it as a separate entry.
+await build({
+  entryPoints: [join(root, 'apps/daemon/src/core/translation-worker.ts')],
+  outfile: join(out, 'dist', 'translation-worker.js'),
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  external: Object.keys(dependencies),
+  logLevel: 'warning',
+});
+
 await cp(webDist, join(out, 'web'), { recursive: true });
 await cp(join(root, 'LICENSE'), join(out, 'LICENSE'));
 await cp(join(root, 'README.md'), join(out, 'README.md'));
+await cp(join(root, 'scripts/setup-translations.mjs'), join(out, 'dist/setup-translations.mjs'));
 
 const manifest = {
   name: cli.name,

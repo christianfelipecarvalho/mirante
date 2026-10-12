@@ -21,7 +21,7 @@ export const signatureOf = (event: DraftEvent): string =>
   // field has something to add about a call already in the log. Everything else
   // keeps its key, so an unchanged re-read appends nothing.
   REREADABLE_KINDS.has(event.kind)
-    ? `${event.dedupeKey ?? event.kind}|${contentHash(event)}`
+    ? `${event.dedupeKey ?? `${event.kind}|${event.agentId}|${event.ts}`}|${event.kind === 'usage.updated' ? event.ts : ''}|${contentHash(event)}`
     : (event.dedupeKey ?? `${event.kind}|${event.agentId}|${event.ts}|${contentHash(event)}`);
 
 export type WatcherOptions = {
@@ -32,6 +32,8 @@ export type WatcherOptions = {
   pollIntervalMs?: number;
   /** How far back to consider a session live. Browsable history is M2. */
   maxAgeMs?: number;
+  /** Repair already-observed history without importing unrelated old sessions. */
+  knownSessionIds?: ReadonlySet<string>;
   /** Project directories to skip, by slug. Mirante's own probe lives in one. */
   ignoreSlugs?: ReadonlySet<string>;
   onWarning?: (message: string) => void;
@@ -56,6 +58,8 @@ export class TranscriptWatcher {
   private readonly signatures = new Map<string, string>();
   /** sessionId → event signatures already appended. */
   private readonly emitted = new Map<string, Set<string>>();
+  private readonly historicalStarts = new Set<string>();
+  private readonly historicalFinishes = new Set<string>();
   private timer: NodeJS.Timeout | undefined;
   private scanning = false;
 
@@ -63,6 +67,7 @@ export class TranscriptWatcher {
     this.options = {
       pollIntervalMs: DEFAULT_POLL_MS,
       maxAgeMs: DEFAULT_MAX_AGE_MS,
+      knownSessionIds: new Set<string>(),
       ignoreSlugs: new Set<string>(),
       ...options,
     };
@@ -74,6 +79,10 @@ export class TranscriptWatcher {
    */
   reindexFromLog(): void {
     for (const event of this.options.log.replay()) {
+      if (event.kind === 'agent.started' && event.dedupeKey)
+        this.historicalStarts.add(`${event.sessionId}|${event.dedupeKey}`);
+      if (event.kind === 'agent.finished' && event.dedupeKey)
+        this.historicalFinishes.add(`${event.sessionId}|${event.dedupeKey}`);
       if (event.source !== 'transcript') continue;
       this.seen(event.sessionId).add(signatureOf(event));
     }
@@ -101,6 +110,7 @@ export class TranscriptWatcher {
         this.options.projectsDir,
         this.options.maxAgeMs,
         this.options.ignoreSlugs,
+        this.options.knownSessionIds,
       )) {
         appended += this.scanSession(session);
       }
@@ -136,7 +146,19 @@ export class TranscriptWatcher {
     }
 
     const seen = this.seen(session.sessionId);
-    const fresh = parsed.events.filter((event) => !seen.has(signatureOf(event)));
+    const historical = session.lastModifiedMs < Date.now() - this.options.maxAgeMs;
+    const fresh = parsed.events.filter(
+      (event) =>
+        !seen.has(signatureOf(event)) &&
+        (!historical ||
+          event.kind === 'agent.instruction' ||
+          event.kind === 'usage.updated' ||
+          event.kind === 'task.plan.updated' ||
+          (event.kind === 'agent.finished' &&
+            this.historicalFinishes.has(`${event.sessionId}|${event.dedupeKey ?? ''}`)) ||
+          (event.kind === 'agent.started' &&
+            this.historicalStarts.has(`${event.sessionId}|${event.dedupeKey ?? ''}`))),
+    );
     if (fresh.length === 0) return 0;
 
     for (const event of fresh) seen.add(signatureOf(event));

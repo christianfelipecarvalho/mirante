@@ -208,3 +208,217 @@ describe('previewProse', () => {
     expect(long.endsWith('…')).toBe(true);
   });
 });
+
+describe('recovering recorded assignments', () => {
+  it('recovers a child-only brief without inventing another human prompt', () => {
+    const text =
+      'First instruction.\n\n```ts\n  preserveIndentation();\n```\n' +
+      'x'.repeat(2500) +
+      '\nFinal requirement.';
+    const events = parseSessionTranscript({
+      mainLines: [humanPrompt, spawnCall],
+      subagents: [
+        {
+          ...subagent,
+          lines: [{ ...subagent.lines[0], message: { role: 'user', content: text } }],
+        },
+      ],
+    }).events;
+    const start = events.find((event) => event.kind === 'agent.started');
+    expect(start?.payload).toMatchObject({
+      brief: text,
+      briefAvailability: 'captured',
+      briefTruncated: false,
+      briefCharCount: text.length,
+    });
+    expect(start?.parentAgentId).toBe('main');
+    expect(events.filter((event) => event.kind === 'prompt.submitted')).toHaveLength(1);
+  });
+
+  it('prefers the complete launch input over a shorter or empty result copy', () => {
+    for (const prompt of ['', 'Short copy']) {
+      const events = parseSessionTranscript({
+        mainLines: [
+          humanPrompt,
+          spawnCall,
+          { ...spawnResult, toolUseResult: { ...spawnResult.toolUseResult, prompt } },
+        ],
+      }).events;
+      expect(events.find((event) => event.kind === 'agent.started')?.payload).toMatchObject({
+        brief: BRIEF,
+      });
+    }
+  });
+
+  it('recognizes Task and gives a resumed assignment its own dedupe key', () => {
+    const initial = {
+      ...spawnCall,
+      message: {
+        ...spawnCall.message,
+        content: [{ ...spawnCall.message.content[0], name: 'Task' }],
+      },
+    };
+    const followup = {
+      ...spawnCall,
+      uuid: 'followup-call',
+      timestamp: '2026-09-22T21:45:00.000Z',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_resume',
+            name: 'Agent',
+            input: { resume: AGENT, prompt: 'Continue with the final check.' },
+          },
+        ],
+      },
+    };
+    const result = {
+      ...spawnResult,
+      uuid: 'followup-result',
+      timestamp: '2026-09-22T21:45:01.000Z',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_resume' }] },
+      toolUseResult: { agentId: AGENT },
+    };
+    const events = parseSessionTranscript({
+      mainLines: [humanPrompt, initial, spawnResult, followup, result],
+    }).events;
+    const starts = events.filter((event) => event.kind === 'agent.started');
+    expect(starts).toHaveLength(2);
+    expect(starts[0]?.payload).toMatchObject({ brief: BRIEF });
+    expect(starts[1]?.payload).toMatchObject({
+      brief: 'Continue with the final check.',
+      followUp: true,
+    });
+    expect(starts[1]?.dedupeKey).not.toBe(starts[0]?.dedupeKey);
+    expect(
+      events.some((event) => event.kind === 'tool.started' && event.payload.toolName === 'Task'),
+    ).toBe(false);
+  });
+
+  it('captures SendMessage with its real recipient without reopening the agent', () => {
+    const events = parseSessionTranscript({
+      mainLines: [
+        humanPrompt,
+        spawnCall,
+        spawnResult,
+        {
+          ...spawnCall,
+          uuid: 'send',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_message',
+                name: 'SendMessage',
+                input: {
+                  type: 'message',
+                  recipient: AGENT,
+                  content: 'Check this next.\n\n  Keep the indentation.',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }).events;
+    expect(events.filter((event) => event.kind === 'agent.started')).toHaveLength(1);
+    const message = events.find((event) => event.kind === 'agent.instruction');
+    expect(message?.agentId).toBe(AGENT);
+    expect(message?.payload).toMatchObject({
+      senderAgentId: 'main',
+      recipientAgentId: AGENT,
+      instructionType: 'message',
+      availability: 'captured',
+      text: 'Check this next.\n\n  Keep the indentation.',
+      truncated: false,
+    });
+  });
+});
+
+describe('Claude delivery identity', () => {
+  it('does not invent a parent assignment from a teammate envelope', () => {
+    const delivered = {
+      ...subagent.lines[0],
+      message: {
+        role: 'user',
+        content:
+          '<teammate-message teammate_id="peer-agent">Check the response.</teammate-message>',
+      },
+    };
+    const events = parseSessionTranscript({
+      mainLines: [humanPrompt],
+      subagents: [{ agentId: AGENT, lines: [delivered] }],
+    }).events;
+    expect(events.some((event) => event.kind === 'agent.started')).toBe(false);
+    expect(events.find((event) => event.kind === 'agent.instruction')?.payload).toMatchObject({
+      senderAgentId: 'peer-agent',
+      recipientAgentId: AGENT,
+      instructionType: 'message',
+      text: 'Check the response.',
+    });
+  });
+
+  it('deduplicates an explicitly linked delivery while retaining the sending tool acknowledgement', () => {
+    const send = {
+      ...spawnCall,
+      uuid: 'send-uuid',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'send-id',
+            name: 'SendMessage',
+            input: { type: 'broadcast', content: 'Check the response.' },
+          },
+        ],
+      },
+    };
+    const ack = {
+      ...spawnResult,
+      sourceToolAssistantUUID: 'send-uuid',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'send-id' }] },
+      toolUseResult: { success: true },
+    };
+    const delivered = {
+      ...subagent.lines[0],
+      parentUuid: 'previous',
+      sourceToolAssistantUUID: 'send-uuid',
+      message: {
+        role: 'user',
+        content: '<teammate-message teammate_id="main">Check the response.</teammate-message>',
+      },
+    };
+    const events = parseSessionTranscript({
+      mainLines: [humanPrompt, spawnCall, spawnResult, send, ack],
+      subagents: [{ ...subagent, lines: [...subagent.lines, delivered] }],
+    }).events;
+    expect(events.filter((event) => event.kind === 'agent.instruction')).toHaveLength(1);
+    expect(
+      events.some(
+        (event) => event.kind === 'tool.finished' && event.payload.toolUseId === 'send-id',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not assume that an unlinked later user entry was sent by the parent', () => {
+    const delivered = {
+      ...subagent.lines[0],
+      uuid: 'later-user',
+      parentUuid: 'previous',
+      message: { role: 'user', content: 'A separately recorded follow-up.' },
+    };
+    const events = parseSessionTranscript({
+      mainLines: [humanPrompt, spawnCall, spawnResult],
+      subagents: [{ ...subagent, lines: [...subagent.lines, delivered] }],
+    }).events;
+    expect(events.find((event) => event.kind === 'agent.instruction')?.payload).toMatchObject({
+      senderAgentId: 'unknown',
+      recipientAgentId: AGENT,
+      text: 'A separately recorded follow-up.',
+    });
+  });
+});

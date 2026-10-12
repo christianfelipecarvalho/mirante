@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
 import {
   MAIN_AGENT_ID,
+  isInjectedMessage,
   reportedEffort,
   dedupeKeys,
   type DraftEvent,
   type Entrypoint,
   type PlanUsage,
 } from '@mirante/shared';
-import { SAID_PREVIEW_LENGTH, preview } from '../../core/redact.js';
+import { SAID_PREVIEW_LENGTH, preview, captureInstruction } from '../../core/redact.js';
+import { normalizeWorkPlan } from '../../core/work-plan.js';
 
 /**
  * Reads an OpenAI Codex rollout file into the normalized event vocabulary.
@@ -54,6 +56,8 @@ export type CodexThreadState = {
   parentAgentId?: string;
   agentType?: string;
   task?: string;
+  agentPath?: string;
+  assignmentStart?: Extract<DraftEvent, { kind: 'agent.started' }>;
   cwd: string;
   gitBranch?: string;
   entrypoint: Entrypoint;
@@ -77,6 +81,8 @@ export type CodexThreadState = {
   runs: number;
   /** call_id → the tool name shown for it, while it runs. */
   openCalls: Record<string, string>;
+  /** Native plan calls awaiting acknowledgement, with their original turn context. */
+  pendingPlans: Map<string, Extract<DraftEvent, { kind: 'task.plan.updated' }>>;
   /** The call a waiting state belongs to, so only its answer clears it. */
   waitingOn?: string;
   /** Skills already reported in this turn. */
@@ -106,6 +112,7 @@ export const createThreadState = (): CodexThreadState => ({
   own: true,
   runs: 0,
   openCalls: {},
+  pendingPlans: new Map(),
   skillsThisTurn: [],
   spawnedRoles: [],
 });
@@ -159,9 +166,11 @@ const identify = (state: CodexThreadState, meta: Json): void => {
     state.agentId = state.threadId;
     state.parentAgentId = !parent || parent === state.sessionId ? MAIN_AGENT_ID : parent;
     state.agentType = str(meta.agent_role) ?? str(spawn?.agent_role) ?? 'default';
-    const task = taskFromPath(str(meta.agent_path) ?? str(spawn?.agent_path));
+    state.agentPath = str(meta.agent_path) ?? str(spawn?.agent_path);
+    const task = taskFromPath(state.agentPath);
     if (task) state.task = task;
   }
+  if (!isSubagent) state.agentPath = '/root';
   // A forked thread opens with its parent's history; its own starts later.
   state.resumed = !isSubagent && str(meta.forked_from_id) !== undefined;
   state.own = !isSubagent && !state.resumed;
@@ -241,6 +250,18 @@ const outputText = (output: unknown): string => {
     return isObj(first) ? String(first.text) : '';
   }
   return '';
+};
+
+/** A proposal is not progress: only the native tool's explicit acknowledgement commits it. */
+const planSucceeded = (payload: Json): boolean => {
+  if (
+    payload.is_error === true ||
+    payload.error !== undefined ||
+    payload.success === false ||
+    payload.status === 'failed'
+  )
+    return false;
+  return /^Plan updated\.?$/i.test(outputText(payload.output).trim());
 };
 
 const failed = (text: string): string | undefined => {
@@ -417,7 +438,7 @@ export const parseRolloutLines = (
           } else {
             state.runs += 1;
             const followUp = state.runs > 1 && state.turnId !== undefined;
-            events.push({
+            const start: Extract<DraftEvent, { kind: 'agent.started' }> = {
               ...base,
               kind: 'agent.started',
               dedupeKey: followUp
@@ -425,14 +446,18 @@ export const parseRolloutLines = (
                 : dedupeKeys.agentStarted(state.agentId),
               payload: {
                 agentType: state.agentType ?? 'default',
+                ...(state.turnId ? { assignmentId: state.turnId } : {}),
                 ...(state.task ? { description: state.task } : {}),
                 ...(state.model ? { model: state.model } : {}),
                 // Codex's spawn_agent returns at once; the parent waits, if it
                 // waits, with a separate call.
                 spawnMode: 'async',
+                briefAvailability: 'missing',
                 ...(followUp ? { followUp: true } : {}),
               },
-            });
+            };
+            state.assignmentStart = start;
+            events.push(start);
           }
           break;
         }
@@ -440,26 +465,37 @@ export const parseRolloutLines = (
         case 'task_complete':
         case 'turn_aborted': {
           const interrupted = kind === 'turn_aborted';
-          state.openCalls = {};
-          delete state.waitingOn;
+          const finishedTurnId = str(payload.turn_id) ?? state.turnId;
+          const olderAssignment = state.turnId !== undefined && finishedTurnId !== state.turnId;
+          if (!olderAssignment) {
+            state.openCalls = {};
+            state.pendingPlans.clear();
+            delete state.waitingOn;
+          }
           if (isMain) {
+            if (olderAssignment) break;
             events.push({
               ...base,
               kind: 'waiting.changed',
               payload: { status: { state: 'idle' } },
             });
           } else if (state.runs > 0) {
-            const result = preview(payload.last_agent_message);
+            const result = captureInstruction(payload.last_agent_message);
             events.push({
               ...base,
+              ...(olderAssignment ? { promptId: str(payload.root_turn_id) } : {}),
               kind: 'agent.finished',
-              dedupeKey: dedupeKeys.agentFollowUpFinished(state.agentId, state.turnId ?? ts),
+              dedupeKey: dedupeKeys.agentFollowUpFinished(state.agentId, finishedTurnId ?? ts),
               payload: {
                 outcome: interrupted ? 'interrupted' : 'ok',
+                ...(finishedTurnId ? { assignmentId: finishedTurnId } : {}),
                 ...(typeof payload.duration_ms === 'number'
                   ? { durationMs: Math.max(0, Math.round(payload.duration_ms)) }
                   : {}),
-                ...(result ? { resultPreview: result } : {}),
+                resultAvailability: result.availability,
+                ...(result.text ? { resultPreview: result.text } : {}),
+                ...(result.charCount !== undefined ? { resultCharCount: result.charCount } : {}),
+                ...(result.truncated !== undefined ? { resultTruncated: result.truncated } : {}),
                 ...(state.parentAgentId ? { handedBackTo: state.parentAgentId } : {}),
               },
             });
@@ -584,6 +620,10 @@ export const parseRolloutLines = (
     }
 
     if (type !== 'response_item') continue;
+    if (kind === 'agent_message') {
+      receiveInstruction(events, base, state, payload);
+      continue;
+    }
     const callId = str(payload.call_id);
 
     if ((kind === 'custom_tool_call' || kind === 'function_call') && callId) {
@@ -603,6 +643,44 @@ export const parseRolloutLines = (
       // Bookkeeping calls with nothing to show: an asynchronous question is
       // echoed as the agent's own message, a sleep is a pause.
       if (name === 'request_user_input_async' || name === 'sleep' || name === 'wait') continue;
+
+      if (name === 'update_plan') {
+        let input: unknown;
+        try {
+          input = JSON.parse(text);
+        } catch {
+          // Corrupt arguments never replace a previously confirmed plan.
+          continue;
+        }
+        const nativePlan = isObj(input) && Array.isArray(input.plan) ? input.plan : undefined;
+        if (!nativePlan || nativePlan.length > 500) continue;
+        const steps = normalizeWorkPlan(
+          nativePlan.map((step, index) =>
+            isObj(step) ? { id: `step-${index + 1}`, text: step.step, status: step.status } : step,
+          ),
+        );
+        if (!steps) continue;
+        const scopeId = isMain ? (state.promptId ?? state.turnId) : state.turnId;
+        state.pendingPlans.set(callId, {
+          ...base,
+          kind: 'task.plan.updated',
+          correlationId: callId,
+          dedupeKey: dedupeKeys.taskPlan(callId, state.agentId),
+          payload: {
+            planId: `codex:${state.threadId}:${scopeId ?? 'unscoped'}`,
+            ...(scopeId ? { scopeId } : {}),
+            sourceTool: 'update_plan',
+            completeness: 'full',
+            steps,
+          },
+        });
+        // Unanswered calls do not grow state without limit in a long-running thread.
+        if (state.pendingPlans.size > 256) {
+          const oldest = state.pendingPlans.keys().next().value;
+          if (oldest !== undefined) state.pendingPlans.delete(oldest);
+        }
+        continue;
+      }
 
       for (const skill of skillsIn(text)) {
         if (state.skillsThisTurn.includes(skill)) continue;
@@ -624,6 +702,12 @@ export const parseRolloutLines = (
     }
 
     if ((kind === 'custom_tool_call_output' || kind === 'function_call_output') && callId) {
+      const plan = state.pendingPlans.get(callId);
+      if (plan) {
+        state.pendingPlans.delete(callId);
+        if (planSucceeded(payload)) events.push({ ...plan, ts });
+        continue;
+      }
       if (state.waitingOn === callId) {
         delete state.waitingOn;
         events.push({
@@ -666,9 +750,12 @@ type Base = Omit<
 >;
 
 const pushPrompt = (events: DraftEvent[], base: Base, state: CodexThreadState, text: string) => {
-  // A subagent's instruction arrives from its parent, encrypted, and is not a
-  // person typing. Only the root has prompts.
-  if (state.agentId !== MAIN_AGENT_ID) return;
+  // A child's own plaintext user message is an assignment, never a human
+  // prompt. Inherited history has already been excluded by the own-turn gate.
+  if (state.agentId !== MAIN_AGENT_ID) {
+    if (!isInjectedMessage(text)) enrichAssignment(events, state, text);
+    return;
+  }
   const body = text.trim();
   if (!body) return;
   events.push({
@@ -704,7 +791,8 @@ const pushSaid = (events: DraftEvent[], base: Base, state: CodexThreadState, tex
 /**
  * Codex's team tools. Spawning is recorded in the child's own file, where the
  * edge is data, so here it only teaches the parent what it is waiting on.
- * Messages between agents are encrypted and never shown.
+ * The original call can contain ciphertext. Instructions are recovered from
+ * the separately recorded delivery, without displaying or decoding that echo.
  */
 const pushCollaboration = (
   events: DraftEvent[],
@@ -783,6 +871,78 @@ const pushQuestion = (
           ref: callId,
         },
       },
+    },
+  });
+};
+
+/** Re-report the same assignment with its later received text. This refines a
+ * start, never increments a child count or reopens an already completed run. */
+const enrichAssignment = (events: DraftEvent[], state: CodexThreadState, text: string) => {
+  const start = state.assignmentStart;
+  if (!start) return;
+  const captured = captureInstruction(text);
+  if (start.payload.briefAvailability === 'captured' && captured.availability !== 'captured')
+    return;
+  const enriched: typeof start = {
+    ...start,
+    payload: {
+      ...start.payload,
+      briefAvailability: captured.availability,
+      ...(captured.text
+        ? {
+            brief: captured.text,
+            briefCharCount: captured.charCount,
+            briefTruncated: captured.truncated,
+          }
+        : {}),
+    },
+  };
+  state.assignmentStart = enriched;
+  events.push(enriched);
+};
+
+/** The sender's function-call argument may be encrypted, but Codex records the
+ * delivered message in plaintext. Read that record, not the encrypted tool echo. */
+const receiveInstruction = (
+  events: DraftEvent[],
+  base: Base,
+  state: CodexThreadState,
+  payload: Json,
+) => {
+  const text = messageText(payload);
+  const envelope =
+    /^Message Type:\s*(NEW_TASK|MESSAGE|FINAL_ANSWER)\r?\nTask name:[^\n]*\r?\nSender:[^\n]*\r?\nPayload:\s*\r?\n?([\s\S]*)$/.exec(
+      text.trim(),
+    );
+  // Returns are already represented by the sender's answer and agent.finished.
+  if (envelope?.[1] === 'FINAL_ANSWER') return;
+  const body = envelope?.[2] ?? text;
+  if (envelope?.[1] === 'NEW_TASK' && state.agentId !== MAIN_AGENT_ID && state.assignmentStart) {
+    enrichAssignment(events, state, body);
+    return;
+  }
+  const author = str(payload.author);
+  if (!author) return;
+  const parentPath = state.agentPath?.slice(0, state.agentPath.lastIndexOf('/'));
+  const sender =
+    author === '/root'
+      ? MAIN_AGENT_ID
+      : author === parentPath && state.parentAgentId
+        ? state.parentAgentId
+        : author;
+  const captured = captureInstruction(body);
+  events.push({
+    ...base,
+    kind: 'agent.instruction',
+    dedupeKey: dedupeKeys.agentInstruction(
+      str(payload.id) ?? `${state.threadId}:${base.ts}:${hash(body)}`,
+      state.agentId,
+    ),
+    payload: {
+      senderAgentId: sender,
+      recipientAgentId: state.agentId,
+      instructionType: envelope?.[1] === 'NEW_TASK' ? 'followup' : 'message',
+      ...captured,
     },
   });
 };

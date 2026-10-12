@@ -115,6 +115,37 @@ describe('grouping a session into requests', () => {
   });
 });
 
+describe('correcting usage while a reply arrives', () => {
+  const report = (output: number, extra: Record<string, unknown> = {}) =>
+    ev({
+      kind: 'usage.updated',
+      promptId: 'p1',
+      dedupeKey: 'usage.updated:response-1',
+      payload: { scope: 'agent', responseId: 'response-1', tokens: tokens(output), ...extra },
+    });
+  it('counts the final reading of a response rather than adding every partial reading', () => {
+    const turns = buildTurns([report(10), report(25), report(25)], 'sess-1');
+    expect(turns[0]?.tokens.output).toBe(25);
+    expect(turns[0]?.tokens.input).toBe(1);
+  });
+  it('replaces previously recorded duplicate blocks without duplicating the corrected reply', () => {
+    const old = ['block-1', 'block-2'].map((key) =>
+      ev({
+        kind: 'usage.updated',
+        promptId: 'p1',
+        dedupeKey: key,
+        payload: { scope: 'agent', tokens: tokens(25) },
+      }),
+    );
+    const turns = buildTurns(
+      [...old, report(25, { replacesUsageKeys: ['block-1', 'block-2'] })],
+      'sess-1',
+    );
+    expect(turns[0]?.tokens.output).toBe(25);
+    expect(turns[0]?.tokens.input).toBe(1);
+  });
+});
+
 describe('turning the stream into readable steps', () => {
   it('folds a tool start and finish into one line with an outcome', () => {
     const steps = buildSteps(conversation(), { sessionId: 'sess-1', agentId: 'a1' });

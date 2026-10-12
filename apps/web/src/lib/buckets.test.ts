@@ -25,6 +25,7 @@ const card = (
     ...(options.lastEventAt ? { lastEventAt: options.lastEventAt } : {}),
     ...(options.limited ? { stoppedAtLimit: { window: 'fiveHour' } } : {}),
     runningChildren: 0,
+    ...(state === 'done' ? { outcome: 'ok' as const } : {}),
   }) as AgentCard;
 
 describe('bucketOf', () => {
@@ -46,13 +47,13 @@ describe('bucketOf', () => {
     expect(bucketOf(busy, NOW)).toBe('working');
   });
 
-  /**
-   * "No signal" implies something might still be out there. When the session
-   * closed, nothing is: those agents did not stall, they were cut short.
-   */
-  it('does not call an agent silent when its session closed under it', () => {
+  it('does not assert completion when the session closed under an agent', () => {
     const cut = card('a', 'tool_running', { lastEventAt: '2026-09-25T09:00:00.000Z' });
-    expect(bucketOf(cut, NOW, true)).toBe('finished');
+    expect(bucketOf(cut, NOW, true)).toBe('no_signal');
+    const unknown = card('b', 'done', { endedAt: '2026-09-25T10:05:00.000Z' });
+    delete unknown.outcome;
+    expect(bucketOf(unknown, NOW, true)).toBe('no_signal');
+    expect(bucketOf({ ...unknown, outcome: 'interrupted' }, NOW, true)).toBe('stopped');
   });
 });
 

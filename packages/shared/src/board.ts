@@ -1,8 +1,11 @@
+import type { EventSource } from './kinds.js';
 import type { SpawnMode } from './agent.js';
 import type { EffortLevel } from './effort.js';
 import type { Entrypoint, Harness } from './kinds.js';
 import type { CardStatus } from './state.js';
 import type { ContextUsage, PlanUsage, TokenUsage } from './usage.js';
+import type { AgentControlRun } from './control.js';
+import type { WorkPlan } from './work-plan.js';
 
 /** The plan limits of one harness other than Claude Code, and when they were read. */
 export type HarnessPlan = {
@@ -34,6 +37,8 @@ export type AgentCard = {
    * kept separately from activity, which the first tool call would overwrite.
    */
   task?: string;
+  /** Latest confirmed checklist for this assignment; never inferred from activity. */
+  plan?: WorkPlan;
   /**
    * The instruction this agent was given, as far as the board kept it.
    *
@@ -42,6 +47,8 @@ export type AgentCard = {
    * which is the question the product exists to answer.
    */
   brief?: string;
+  briefAvailability?: 'captured' | 'encrypted' | 'missing';
+  briefTruncated?: boolean;
   /** The brief's length before truncation, when it was cut. */
   briefCharCount?: number;
   parentAgentId?: string;
@@ -67,8 +74,15 @@ export type AgentCard = {
   effort?: EffortLevel;
   spawnMode?: SpawnMode;
   tokens: TokenUsage;
+  usageUpdatedAt?: string;
   startedAt: string;
   endedAt?: string;
+  /** The explicit finish report; a session close alone never fills this in. */
+  outcome?: 'ok' | 'error' | 'interrupted';
+  resultPreview?: string;
+  resultAvailability?: 'captured' | 'encrypted' | 'missing';
+  resultTruncated?: boolean;
+  resultCharCount?: number;
   /**
    * Subagents launched by this card that have not finished.
    *
@@ -109,7 +123,10 @@ export type SessionLane = {
   startedAt: string;
   endedAt?: string;
   tokens: TokenUsage;
+  usageUpdatedAt?: string;
   costUsd?: number;
+  costUpdatedAt?: string;
+  costSource?: EventSource;
   context?: ContextUsage;
   /** Root card first, then subagents in spawn order. */
   cards: AgentCard[];
@@ -179,6 +196,8 @@ export type BoardState = {
   harnessPlans?: Partial<Record<Exclude<Harness, 'claude-code'>, HarnessPlan>>;
   timeline: TimelineEntry[];
   pendingApprovals: PendingApproval[];
+  /** Explicitly requested recovery runs. They never imply that an old task is done. */
+  controlRuns?: AgentControlRun[];
 };
 
 export const emptyBoard = (): BoardState => ({

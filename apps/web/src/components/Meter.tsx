@@ -43,7 +43,7 @@ export const Meter = ({ label, reading }: MeterProps) => {
         : '';
 
   return (
-    <div className="w-[176px] min-w-0">
+    <div className="plan-meter w-[176px] min-w-0">
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-[11px] text-[var(--text-secondary)]">{label}</span>
         <span
@@ -68,8 +68,8 @@ export const Meter = ({ label, reading }: MeterProps) => {
       >
         {known && (
           <div
-            className="h-full rounded-full transition-[width] duration-[250ms]"
-            style={{ width: `${Math.max(value, 1.5)}%`, background: fillFor(value) }}
+            className="h-full w-full origin-left rounded-full transition-transform duration-300 ease-out"
+            style={{ transform: `scaleX(${value / 100})`, background: fillFor(value) }}
           />
         )}
       </div>

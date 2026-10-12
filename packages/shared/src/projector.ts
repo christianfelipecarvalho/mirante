@@ -7,12 +7,16 @@ import type {
   TimelineEntry,
   TimelineKind,
 } from './board.js';
+import { TokenLedger } from './token-ledger.js';
 import { MAIN_AGENT_ID } from './agent.js';
-import { REREADABLE_KINDS, dedupeKeyOf, sourceOutranks } from './dedupe.js';
-import type { MiranteEvent } from './event.js';
+import { REREADABLE_KINDS, dedupeKeyOf, dedupeKeys, sourceOutranks } from './dedupe.js';
+import type { MiranteEvent, MiranteEventOf } from './event.js';
 import type { EventSource, Harness } from './kinds.js';
 import { isTerminalState, type CardStatus, type WaitingOn } from './state.js';
 import { livenessOf } from './liveness.js';
+import type { AgentControlRun } from './control.js';
+import { isTaskContinuation } from './work-plan.js';
+import { requestText } from './text.js';
 import {
   PLAN_READING_MAX_AGE_MS,
   addTokenUsage,
@@ -49,6 +53,7 @@ const active = (state: 'idle' | 'thinking' | 'tool_running' | 'done' | 'error'):
  * event.
  */
 export class BoardProjector {
+  private readonly tokenLedger = new TokenLedger();
   private readonly lanes = new Map<string, SessionLane>();
   private readonly cards = new Map<string, AgentCard>();
   private readonly pending = new Map<string, PendingApproval>();
@@ -64,6 +69,8 @@ export class BoardProjector {
    * child finished.
    */
   private readonly countedStarts = new Set<string>();
+  /** Late re-reads enrich the matching assignment, never replace a newer one. */
+  private readonly assignmentAt = new Map<string, { startKey: string; ts: string }>();
   /**
    * cardKey → when its current request was typed. A skill reported late — a
    * transcript read after the next prompt, a log written before a parser knew
@@ -71,6 +78,19 @@ export class BoardProjector {
    * use now. Arrival order cannot say that; the origin time can.
    */
   private readonly promptedAt = new Map<string, string>();
+  /** Current assignment boundary, independent of acknowledgements and lifecycle state. */
+  private readonly workScopeAt = new Map<
+    string,
+    { ts: string; promptId?: string; assignmentId?: string }
+  >();
+  private readonly promptDates = new Map<string, Map<string, string>>();
+  private readonly planKeys = new Map<string, string>();
+  private readonly finishKeys = new Map<string, string>();
+  /** Child files can be flushed before the parent's assignment result. */
+  private readonly deferredPlans = new Map<
+    string,
+    Map<string, MiranteEventOf<'task.plan.updated'>>
+  >();
   /**
    * cardKey → when the card's model was last seen in one of its own replies.
    *
@@ -88,6 +108,7 @@ export class BoardProjector {
   /** Every other harness's plan, newest reading each. */
   private readonly harnessPlans = new Map<Exclude<Harness, 'claude-code'>, HarnessPlan>();
   private lastEventId = 0;
+  private readonly controlRuns = new Map<string, AgentControlRun>();
 
   apply(event: MiranteEvent): void {
     if (event.id > this.lastEventId) this.lastEventId = event.id;
@@ -100,12 +121,29 @@ export class BoardProjector {
       if (
         previous !== undefined &&
         !sourceOutranks(event.source, previous) &&
-        !REREADABLE_KINDS.has(event.kind)
+        (!REREADABLE_KINDS.has(event.kind) || sourceOutranks(previous, event.source))
       ) {
         return;
       }
       this.applied.set(key, event.source);
     }
+
+    // Control acknowledgement is not evidence of task activity or completion.
+    // Keep it replayable without making an old agent look alive or inventing one.
+    if (event.kind === 'agent.control.updated') {
+      this.controlRuns.set(event.payload.runId, {
+        ...event.payload,
+        sessionId: event.sessionId,
+        agentId: event.agentId,
+      });
+      if (this.controlRuns.size > 200)
+        this.controlRuns.delete(this.controlRuns.keys().next().value!);
+      return;
+    }
+
+    // Receiving an instruction is not evidence that execution started, nor that
+    // the recipient changed parents. Activity readers consume the logged event.
+    if (event.kind === 'agent.instruction') return;
 
     // Plan limits belong to the account, not to a session. Folding them before a
     // lane exists is what lets the `/usage` probe report them without inventing
@@ -157,6 +195,66 @@ export class BoardProjector {
     }
 
     const card = this.ensureCard(event);
+    if (event.kind === 'agent.finished') {
+      const finishKey = cardKey(event.sessionId, event.agentId);
+      const scope = this.workScopeAt.get(finishKey);
+      const sameAssignment =
+        scope?.assignmentId && scope.assignmentId === event.payload.assignmentId;
+      if (scope?.assignmentId && event.payload.assignmentId && !sameAssignment) return;
+      if (scope && event.ts < scope.ts && !sameAssignment) return;
+      if (
+        card.endedAt &&
+        event.ts < card.endedAt &&
+        (!key || key !== this.finishKeys.get(finishKey))
+      )
+        return;
+      // Re-reading a known finish may enrich its historical activity row, but
+      // cannot stop work that subsequently resumed without a new spawn report.
+      if (key && key === this.finishKeys.get(finishKey) && !card.endedAt) return;
+    }
+    // A checklist is metadata. Historical repairs must not wake an agent, move
+    // its activity clock or reopen an ended session.
+    if (event.kind === 'task.plan.updated') {
+      const planKey = cardKey(event.sessionId, event.agentId);
+      const scope = this.workScopeAt.get(planKey);
+      const scopeId = event.payload.scopeId ?? event.promptId;
+      if (event.agentId !== MAIN_AGENT_ID && event.payload.scopeId) {
+        const plans =
+          this.deferredPlans.get(planKey) ?? new Map<string, MiranteEventOf<'task.plan.updated'>>();
+        const previous = plans.get(event.payload.scopeId);
+        if (!previous || event.ts >= previous.ts) plans.set(event.payload.scopeId, event);
+        if (plans.size > 3) plans.delete(plans.keys().next().value!);
+        this.deferredPlans.set(planKey, plans);
+      }
+      if (scope?.assignmentId && scopeId && scope.assignmentId !== scopeId) return;
+      const promptAt = scopeId
+        ? this.promptDates.get(cardKey(event.sessionId, event.agentId))?.get(scopeId)
+        : undefined;
+      if (
+        scope &&
+        ((promptAt && promptAt < scope.ts) ||
+          (event.ts < scope.ts &&
+            !(
+              (scope.promptId && scopeId === scope.promptId) ||
+              (scope.assignmentId && scopeId === scope.assignmentId)
+            )))
+      )
+        return;
+      if (
+        card.plan &&
+        event.ts < card.plan.updatedAt &&
+        (!key || key !== this.planKeys.get(planKey))
+      )
+        return;
+      card.plan = {
+        ...event.payload,
+        steps: event.payload.steps.map((step) => ({ ...step })),
+        updatedAt: event.ts,
+      };
+      if (key) this.planKeys.set(planKey, key);
+      else this.planKeys.delete(planKey);
+      return;
+    }
     this.observeSessionWork(event, lane, card);
     if (card.lastEventAt === undefined || event.ts > card.lastEventAt) card.lastEventAt = event.ts;
 
@@ -214,6 +312,24 @@ export class BoardProjector {
       }
 
       case 'prompt.submitted': {
+        const text = requestText(event.payload.preview);
+        if (text && event.agentId === MAIN_AGENT_ID) {
+          const scopeKey = cardKey(event.sessionId, event.agentId);
+          if (event.promptId) {
+            const dates = this.promptDates.get(scopeKey) ?? new Map<string, string>();
+            dates.set(event.promptId, event.ts);
+            this.promptDates.set(scopeKey, dates);
+          }
+          const scope = this.workScopeAt.get(scopeKey);
+          if (!isTaskContinuation(text)) {
+            if (scope?.promptId && scope.promptId === event.promptId) {
+              if (event.ts < scope.ts) scope.ts = event.ts;
+            } else if (!scope || event.ts >= scope.ts) {
+              this.workScopeAt.set(scopeKey, { ts: event.ts, promptId: event.promptId });
+              delete card.plan;
+            }
+          }
+        }
         if (card.endedAt && event.ts <= card.endedAt) {
           this.push(event, 'prompt', event.payload.preview);
           break;
@@ -252,11 +368,58 @@ export class BoardProjector {
       }
 
       case 'agent.started': {
+        const startKey = dedupeKeyOf(event) ?? cardKey(event.sessionId, event.agentId);
+        // Append-only logs written before assignmentId retain Codex's native
+        // turn in the follow-up key. New producers use the normalized field.
+        const legacyPrefix = dedupeKeys.agentFollowUp(event.agentId, '');
+        const assignmentId =
+          event.payload.assignmentId ??
+          (event.source === 'codex-rollout' &&
+          event.payload.followUp &&
+          startKey.startsWith(legacyPrefix)
+            ? startKey.slice(legacyPrefix.length) || undefined
+            : undefined);
+        const firstReport = !this.countedStarts.has(startKey);
+        this.countedStarts.add(startKey);
+        const assignmentKey = cardKey(event.sessionId, event.agentId);
+        const latest = this.assignmentAt.get(assignmentKey);
+        if (latest && latest.startKey !== startKey && latest.ts > event.ts) break;
+        const alreadyRunning = Boolean(latest) && card.endedAt === undefined;
+        const previousParentId = card.parentAgentId ?? MAIN_AGENT_ID;
+        this.assignmentAt.set(assignmentKey, { startKey, ts: event.ts });
+        if (latest?.startKey === startKey && assignmentId) {
+          const scope = this.workScopeAt.get(assignmentKey);
+          if (scope && !scope.assignmentId) {
+            scope.assignmentId = assignmentId;
+            if (event.ts < scope.ts) scope.ts = event.ts;
+          }
+        }
+        if (firstReport && event.payload.followUp) {
+          this.workScopeAt.set(assignmentKey, {
+            ts: event.ts,
+            assignmentId,
+          });
+          delete card.plan;
+          delete card.brief;
+          delete card.briefCharCount;
+          delete card.briefAvailability;
+          delete card.briefTruncated;
+          delete card.task;
+        }
+        if (!latest && firstReport && !this.workScopeAt.has(assignmentKey))
+          this.workScopeAt.set(assignmentKey, {
+            ts: event.ts,
+            assignmentId,
+          });
         card.agentType = event.payload.agentType;
         // Kept out of `activity`, which the agent's first tool call overwrites.
         if (event.payload.description) card.task = event.payload.description;
         // What it was actually asked to do, as far as ingest kept it.
         if (event.payload.brief) card.brief = event.payload.brief;
+        if (event.payload.briefAvailability && (!card.brief || event.payload.brief))
+          card.briefAvailability = event.payload.briefAvailability;
+        if (event.payload.briefTruncated !== undefined)
+          card.briefTruncated = event.payload.briefTruncated;
         if (event.payload.briefCharCount !== undefined) {
           card.briefCharCount = event.payload.briefCharCount;
         }
@@ -275,21 +438,31 @@ export class BoardProjector {
         // reads a transcript later than the hook fired. It may correct the
         // details above, but it must not bring a finished agent back to life.
         // Only a start that declares itself a new assignment may do that, once.
-        const startKey = dedupeKeyOf(event) ?? cardKey(event.sessionId, event.agentId);
-        const firstReport = !this.countedStarts.has(startKey);
-        this.countedStarts.add(startKey);
-        if (firstReport && event.payload.followUp && card.endedAt !== undefined) {
+        if (firstReport && event.payload.followUp && (!card.endedAt || event.ts > card.endedAt)) {
           delete card.endedAt;
           delete card.stoppedAtLimit;
+          delete card.outcome;
+          delete card.resultPreview;
+          delete card.resultAvailability;
+          delete card.resultTruncated;
+          delete card.resultCharCount;
         }
         if (card.endedAt === undefined) {
           card.status = active('thinking');
           if (event.payload.description) card.activity = event.payload.description;
         }
 
-        const parent = firstReport ? this.parentOf(event) : undefined;
+        const parent = firstReport && !card.endedAt ? this.parentOf(event) : undefined;
         if (parent) {
-          parent.runningChildren += 1;
+          // A new assignment to an already active child is still one child.
+          if (!alreadyRunning || previousParentId !== parent.agentId) {
+            parent.runningChildren += 1;
+            if (alreadyRunning) {
+              const previousParent = this.cards.get(cardKey(event.sessionId, previousParentId));
+              if (previousParent)
+                previousParent.runningChildren = Math.max(0, previousParent.runningChildren - 1);
+            }
+          }
           // Only a synchronous call blocks the parent. An async one leaves it
           // working, with a count badge instead of a waiting state.
           if (event.payload.spawnMode === 'sync') {
@@ -309,6 +482,10 @@ export class BoardProjector {
           `${(parent ?? this.parentOf(event))?.agentType ?? (parent ?? this.parentOf(event))?.agentId ?? MAIN_AGENT_ID} → ${event.payload.agentType}`,
           event.payload.agentType,
         );
+        if (assignmentId) {
+          const plan = this.deferredPlans.get(assignmentKey)?.get(assignmentId);
+          if (plan) this.apply(plan);
+        }
         break;
       }
 
@@ -319,6 +496,19 @@ export class BoardProjector {
         const wasRunning = card.endedAt === undefined;
         card.status = active(event.payload.outcome === 'error' ? 'error' : 'done');
         card.endedAt = event.ts;
+        card.outcome = event.payload.outcome;
+        if (event.payload.resultPreview) card.resultPreview = event.payload.resultPreview;
+        if (
+          event.payload.resultAvailability &&
+          (!card.resultPreview || event.payload.resultPreview)
+        )
+          card.resultAvailability = event.payload.resultAvailability;
+        if (event.payload.resultTruncated !== undefined)
+          card.resultTruncated = event.payload.resultTruncated;
+        if (event.payload.resultCharCount !== undefined)
+          card.resultCharCount = event.payload.resultCharCount;
+        if (key) this.finishKeys.set(cardKey(event.sessionId, event.agentId), key);
+        if (event.payload.outcome === 'ok') delete card.stoppedAtLimit;
         delete card.activity;
         delete card.currentTool;
 
@@ -449,8 +639,15 @@ export class BoardProjector {
 
       case 'usage.updated': {
         if (event.payload.scope === 'agent') {
-          card.tokens = addTokenUsage(card.tokens, event.payload.tokens);
-          lane.tokens = addTokenUsage(lane.tokens, event.payload.tokens);
+          const delta = this.tokenLedger.apply(event);
+          card.tokens = addTokenUsage(card.tokens, delta);
+          lane.tokens = addTokenUsage(lane.tokens, delta);
+          if (Object.values(delta).some((value) => value !== undefined && value !== 0)) {
+            if (!card.usageUpdatedAt || event.ts > card.usageUpdatedAt)
+              card.usageUpdatedAt = event.ts;
+            if (!lane.usageUpdatedAt || event.ts > lane.usageUpdatedAt)
+              lane.usageUpdatedAt = event.ts;
+          }
           const key = cardKey(event.sessionId, event.agentId);
           const seen = this.modelSeenAt.get(key);
           if (event.payload.model && (seen === undefined || event.ts >= seen)) {
@@ -458,8 +655,15 @@ export class BoardProjector {
             this.modelSeenAt.set(key, event.ts);
           }
         }
-        // Cost and context come from the status line, which reports per session.
-        if (event.payload.costUsd !== undefined) lane.costUsd = event.payload.costUsd;
+        // Native cumulative cost snapshots replace one another; they are never summed.
+        if (
+          event.payload.costUsd !== undefined &&
+          (!lane.costUpdatedAt || event.ts >= lane.costUpdatedAt)
+        ) {
+          lane.costUsd = event.payload.costUsd;
+          lane.costUpdatedAt = event.ts;
+          lane.costSource = event.source;
+        }
         if (event.payload.context) lane.context = event.payload.context;
         if (event.payload.model && event.agentId === MAIN_AGENT_ID)
           lane.model = event.payload.model;
@@ -513,12 +717,32 @@ export class BoardProjector {
     if (previous === undefined || event.ts > previous)
       this.sessionWorkAt.set(event.sessionId, event.ts);
 
+    // A new prompt/tool can resume a limit-stopped agent before any finish
+    // marker was recorded. Keep delayed observations from clearing the limit.
+    if (
+      event.kind !== 'session.started' &&
+      event.kind !== 'agent.started' &&
+      (!card.lastEventAt || event.ts > card.lastEventAt)
+    ) {
+      delete card.stoppedAtLimit;
+      delete card.outcome;
+      delete card.resultPreview;
+      delete card.resultAvailability;
+      delete card.resultTruncated;
+      delete card.resultCharCount;
+    }
+
     if (lane.endedAt && event.ts > lane.endedAt) {
       delete lane.endedAt;
       const root = this.cards.get(cardKey(event.sessionId, MAIN_AGENT_ID));
       if (root?.endedAt) {
         delete root.endedAt;
         delete root.stoppedAtLimit;
+        delete root.outcome;
+        delete root.resultPreview;
+        delete root.resultAvailability;
+        delete root.resultTruncated;
+        delete root.resultCharCount;
         root.status = active('idle');
       }
     }
@@ -527,6 +751,11 @@ export class BoardProjector {
     if (event.kind !== 'agent.started' && card.endedAt && event.ts > card.endedAt) {
       delete card.endedAt;
       delete card.stoppedAtLimit;
+      delete card.outcome;
+      delete card.resultPreview;
+      delete card.resultAvailability;
+      delete card.resultTruncated;
+      delete card.resultCharCount;
       card.status = active('idle');
     }
   }
@@ -584,6 +813,7 @@ export class BoardProjector {
         : {}),
       timeline: [...this.timeline],
       pendingApprovals: [...this.pending.values()],
+      ...(this.controlRuns.size ? { controlRuns: [...this.controlRuns.values()] } : {}),
     };
   }
 

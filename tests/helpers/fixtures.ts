@@ -48,10 +48,19 @@ export const loadFixture = (name: string): LoadedFixture => {
 export const sumUsageFromRaw = (fixture: LoadedFixture) => {
   const total = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
   const add = (lines: unknown[]) => {
-    for (const line of lines) {
-      const entry = line as { type?: string; message?: { usage?: Record<string, number> } };
-      if (entry.type !== 'assistant' || !entry.message?.usage) continue;
-      const u = entry.message.usage;
+    // A response may be flushed as several assistant entries. The last usage
+    // counters for its message.id describe that same response, not another bill.
+    const responses = new Map<string, Record<string, number>>();
+    for (const [index, line] of lines.entries()) {
+      const entry = line as {
+        type?: string;
+        isApiErrorMessage?: boolean;
+        message?: { id?: string; usage?: Record<string, number> };
+      };
+      if (entry.type !== 'assistant' || entry.isApiErrorMessage || !entry.message?.usage) continue;
+      responses.set(entry.message.id ?? `entry:${index}`, entry.message.usage);
+    }
+    for (const u of responses.values()) {
       total.input += u.input_tokens ?? 0;
       total.output += u.output_tokens ?? 0;
       total.cacheCreation += u.cache_creation_input_tokens ?? 0;

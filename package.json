@@ -25,6 +25,7 @@
     "release:build": "pnpm build && node scripts/build-release.mjs",
     "release:smoke": "node scripts/smoke-release.mjs",
     "start": "pnpm build && node packages/cli/dist/bin.js",
+    "translation:setup": "node scripts/setup-translations.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck && tsc -p tsconfig.test.json"

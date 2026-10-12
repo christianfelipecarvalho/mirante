@@ -1,5 +1,6 @@
 import {
   MAIN_AGENT_ID,
+  REREADABLE_KINDS,
   dedupeKeyOf,
   isInjectedMessage,
   requestText,
@@ -16,7 +17,15 @@ import {
  * duration, which is what this builds.
  */
 export type StepKind =
-  'prompt' | 'said' | 'tool' | 'agent' | 'skill' | 'permission' | 'compaction' | 'error';
+  | 'prompt'
+  | 'instruction'
+  | 'said'
+  | 'tool'
+  | 'agent'
+  | 'skill'
+  | 'permission'
+  | 'compaction'
+  | 'error';
 
 /**
  * `limited` is a stop the plan imposed, not a failure: painted in the serious
@@ -41,6 +50,12 @@ export type Step = {
    * Rendered in the reader's language rather than baked into the title.
    */
   verb?: 'spawned' | 'returned';
+  returnOutcome?: 'ok' | 'error' | 'interrupted';
+  result?: {
+    availability?: 'captured' | 'encrypted' | 'missing';
+    truncated?: boolean;
+    charCount?: number;
+  };
   /** The request that caused this step, so the activity can be read turn by turn. */
   promptId?: string;
   /** For an error: its category, which the interface names in the reader's language. */
@@ -52,6 +67,14 @@ export type Step = {
    * notification. Never a row; it only says what opened the turn.
    */
   injected?: boolean;
+  instruction?: {
+    senderAgentId?: string;
+    recipientAgentId?: string;
+    instructionType: 'assignment' | 'followup' | 'message' | 'broadcast';
+    availability: 'captured' | 'encrypted' | 'missing';
+    charCount?: number;
+    truncated?: boolean;
+  };
 };
 
 const durationBetween = (from: string, to: string): number | undefined => {
@@ -86,8 +109,67 @@ const dedupe = (events: MiranteEvent[]): MiranteEvent[] => {
       continue;
     }
     const existing = winners.get(key);
-    if (!existing || sourceOutranks(event.source, existing.source)) {
-      winners.set(key, event);
+    if (
+      !existing ||
+      sourceOutranks(event.source, existing.source) ||
+      (REREADABLE_KINDS.has(event.kind) &&
+        !sourceOutranks(existing.source, event.source) &&
+        event.id > existing.id)
+    ) {
+      // A re-read can add the instruction after the start was already logged.
+      // Keep captured content when a later report of that same fact omits it.
+      let winner = event;
+      if (
+        existing?.kind === 'agent.started' &&
+        event.kind === 'agent.started' &&
+        existing.payload.brief &&
+        !event.payload.brief
+      ) {
+        winner = {
+          ...event,
+          payload: {
+            ...event.payload,
+            brief: existing.payload.brief,
+            briefCharCount: existing.payload.briefCharCount,
+            briefAvailability: 'captured',
+            briefTruncated: existing.payload.briefTruncated,
+          },
+        };
+      } else if (
+        existing?.kind === 'agent.instruction' &&
+        event.kind === 'agent.instruction' &&
+        existing.payload.text &&
+        !event.payload.text
+      ) {
+        winner = {
+          ...event,
+          payload: {
+            ...event.payload,
+            text: existing.payload.text,
+            charCount: existing.payload.charCount,
+            availability: 'captured',
+            truncated: existing.payload.truncated,
+          },
+        };
+      }
+      if (
+        existing?.kind === 'agent.finished' &&
+        winner.kind === 'agent.finished' &&
+        existing.payload.resultPreview &&
+        !winner.payload.resultPreview
+      ) {
+        winner = {
+          ...winner,
+          payload: {
+            ...winner.payload,
+            resultPreview: existing.payload.resultPreview,
+            resultAvailability: existing.payload.resultAvailability,
+            resultTruncated: existing.payload.resultTruncated,
+            resultCharCount: existing.payload.resultCharCount,
+          },
+        };
+      }
+      winners.set(key, winner);
     }
   }
 
@@ -101,7 +183,9 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
     events.filter(
       (event) =>
         event.sessionId === filter.sessionId &&
-        (filter.agentId === undefined || event.agentId === filter.agentId) &&
+        (filter.agentId === undefined ||
+          event.agentId === filter.agentId ||
+          (event.kind === 'agent.instruction' && event.payload.senderAgentId === filter.agentId)) &&
         (filter.promptId === undefined || event.promptId === filter.promptId),
     ),
   );
@@ -134,10 +218,21 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
         }
         steps.push({
           ...base(event),
-          kind: 'prompt',
+          kind: event.agentId === MAIN_AGENT_ID ? 'prompt' : 'instruction',
           title: 'prompt',
           detail: event.payload.preview,
           status: 'info',
+          ...(event.agentId === MAIN_AGENT_ID
+            ? {}
+            : {
+                instruction: {
+                  senderAgentId: event.parentAgentId,
+                  recipientAgentId: event.agentId,
+                  instructionType: 'assignment' as const,
+                  availability: 'captured' as const,
+                  charCount: event.payload.charCount,
+                },
+              }),
         });
         break;
 
@@ -198,6 +293,24 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
       }
 
       case 'agent.started':
+        if (event.agentId !== MAIN_AGENT_ID)
+          steps.push({
+            ...base(event),
+            kind: 'instruction',
+            title: 'instruction',
+            detail: event.payload.brief,
+            status: 'info',
+            instruction: {
+              senderAgentId: event.parentAgentId,
+              recipientAgentId: event.agentId,
+              instructionType: event.payload.followUp ? 'followup' : 'assignment',
+              availability: event.payload.brief
+                ? 'captured'
+                : (event.payload.briefAvailability ?? 'missing'),
+              charCount: event.payload.briefCharCount,
+              truncated: event.payload.briefTruncated,
+            },
+          });
         steps.push({
           ...base(event),
           kind: 'agent',
@@ -208,13 +321,37 @@ export const buildSteps = (events: MiranteEvent[], filter: StepFilter): Step[] =
         });
         break;
 
+      case 'agent.instruction':
+        steps.push({
+          ...base(event),
+          kind: 'instruction',
+          title: 'instruction',
+          detail: event.payload.text,
+          status: 'info',
+          instruction: { ...event.payload },
+        });
+        break;
+
       case 'agent.finished':
         steps.push({
           ...base(event),
           kind: 'agent',
           verb: 'returned',
           title: event.agentType ?? event.agentId,
-          status: event.payload.outcome === 'error' ? 'failed' : 'ok',
+          detail: event.payload.resultPreview,
+          durationMs: event.payload.durationMs,
+          returnOutcome: event.payload.outcome,
+          result: {
+            availability: event.payload.resultAvailability,
+            truncated: event.payload.resultTruncated,
+            charCount: event.payload.resultCharCount,
+          },
+          status:
+            event.payload.outcome === 'error'
+              ? 'failed'
+              : event.payload.outcome === 'interrupted'
+                ? 'limited'
+                : 'ok',
         });
         break;
 
@@ -290,7 +427,9 @@ export type TurnGroup = {
    * When no person typed it: what opened the turn. A turn started by a subagent
    * reporting back is not "text not captured" — nothing was lost.
    */
-  origin?: 'agent' | 'system';
+  origin?: 'agent' | 'system' | 'delegation';
+  /** Incoming task context, even when a child has a different native turn ID. */
+  instruction?: Step;
   startedAt: string;
   endedAt: string;
   /** Newest first. The main agent's own prompt row is the header, not a row. */
@@ -304,7 +443,7 @@ export type TurnGroup = {
  * Read flat, a session is hundreds of tool calls with no way to tell which
  * request they answered. Grouped, each request is a header you can open.
  */
-export const groupStepsByTurn = (steps: Step[]): TurnGroup[] => {
+export const groupStepsByTurn = (steps: Step[], selectedAgentId?: string): TurnGroup[] => {
   const groups = new Map<string, TurnGroup>();
   for (const step of steps) {
     const key = step.promptId ?? '—';
@@ -334,12 +473,46 @@ export const groupStepsByTurn = (steps: Step[]): TurnGroup[] => {
       continue;
     }
     group.steps.push(step);
+    if (step.agentId !== MAIN_AGENT_ID && !group.origin) group.origin = 'delegation';
     if (step.status === 'failed') group.failed += 1;
   }
 
   const newestFirst = (a: { ts: string; id: number }, b: { ts: string; id: number }) =>
     b.ts.localeCompare(a.ts) || b.id - a.id;
   return [...groups.values()]
-    .map((group) => ({ ...group, steps: [...group.steps].sort(newestFirst) }))
+    .map((group) => {
+      const sorted = [...group.steps].sort(newestFirst);
+      const incoming = sorted.filter(
+        (step) =>
+          step.kind === 'instruction' &&
+          (!selectedAgentId || step.instruction?.recipientAgentId === selectedAgentId),
+      );
+      const recipients = new Set(incoming.map((step) => step.instruction?.recipientAgentId));
+      const context =
+        selectedAgentId && selectedAgentId !== MAIN_AGENT_ID
+          ? steps
+              .filter(
+                (step) =>
+                  step.kind === 'instruction' &&
+                  step.instruction?.recipientAgentId === selectedAgentId &&
+                  ['assignment', 'followup'].includes(step.instruction.instructionType) &&
+                  step.ts <= group.startedAt,
+              )
+              .sort(newestFirst)[0]
+          : undefined;
+      const instruction =
+        !group.prompt && recipients.size <= 1
+          ? (incoming.find((step) =>
+              ['assignment', 'followup'].includes(step.instruction!.instructionType),
+            ) ??
+            context ??
+            incoming[0])
+          : undefined;
+      return {
+        ...group,
+        steps: sorted,
+        ...(instruction ? { instruction, origin: 'delegation' as const } : {}),
+      };
+    })
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 };

@@ -17,8 +17,19 @@ export const BudgetAlerts = ({
 }) => {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<Harness | undefined>();
+  const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
   const instructionId = useId();
-  const assessments = budgetAssessments(board, now).filter((entry) => entry.level !== 'ok');
+  const alertKey = (entry: ReturnType<typeof budgetAssessments>[number]) => {
+    const usage =
+      entry.harness === 'claude-code'
+        ? board.planUsage
+        : board.harnessPlans?.[entry.harness]?.usage;
+    const reset = entry.window ? usage?.[entry.window]?.resetsAt : undefined;
+    return `${entry.harness}:${entry.level}:${entry.reason ?? ''}:${entry.window ?? ''}:${reset ?? ''}:${connection === 'live'}`;
+  };
+  const assessments = budgetAssessments(board, now).filter(
+    (entry) => entry.level !== 'ok' && !dismissed[alertKey(entry)],
+  );
   if (assessments.length === 0) return null;
 
   const download = (harness: Harness) => {
@@ -90,6 +101,19 @@ export const BudgetAlerts = ({
                 className="pressable min-h-9 cursor-pointer rounded px-2 text-[12px] text-[var(--text-primary)]"
               >
                 {t('budget.prepare')}
+              </button>
+              <button
+                type="button"
+                aria-label={t('budget.dismiss', { harness: t(`harness.${harness}`) })}
+                title={t('budget.dismiss', { harness: t(`harness.${harness}`) })}
+                onClick={() => {
+                  setDismissed((previous) => ({ ...previous, [alertKey(assessment)]: true }));
+                  if (open) setExpanded(undefined);
+                  requestAnimationFrame(() => document.getElementById('main-content')?.focus());
+                }}
+                className="pressable grid size-9 cursor-pointer place-items-center rounded text-[var(--text-secondary)]"
+              >
+                <Icon name="cross" size={14} />
               </button>
             </div>
             {open && (

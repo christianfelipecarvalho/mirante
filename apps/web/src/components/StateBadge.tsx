@@ -26,7 +26,7 @@ export const STATE_META: Record<CardState, Meta> = {
  * States the interface derives rather than receives: a card stopped by a plan
  * limit, and a card that claims to be working but has gone silent.
  */
-export type BadgeOverride = 'interrupted' | 'silent';
+export type BadgeOverride = 'interrupted' | 'silent' | 'unconfirmed';
 
 const OVERRIDE_META: Record<BadgeOverride, Meta> = {
   // Orange and a pause, not red and a cross: nothing broke. The plan said stop.
@@ -36,6 +36,7 @@ const OVERRIDE_META: Record<BadgeOverride, Meta> = {
   // idle and also means "all agents" — three meanings on one mark, and the one
   // that made a silent card and a finished card look alike.
   silent: { icon: 'unknown', color: 'var(--text-secondary)' },
+  unconfirmed: { icon: 'unknown', color: 'var(--text-secondary)' },
 };
 
 export const StateBadge = ({
@@ -56,10 +57,10 @@ export const StateBadge = ({
   return (
     <span
       title={title}
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium"
+      className="state-badge inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium"
       style={{
         color: meta.color,
-        background: 'color-mix(in oklab, currentColor 12%, transparent)',
+        background: 'color-mix(in oklab, currentColor 12%, var(--surface-1))',
       }}
     >
       {/* Still, on purpose. With eight agents working, eight pulsing badges are

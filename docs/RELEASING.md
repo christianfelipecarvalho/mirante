@@ -7,6 +7,8 @@ How `mirante` gets to npm. This page is for the maintainer; users want the [Inst
 The workspace packages (`@mirante/shared`, `installer`, `daemon`) are private and live only in this repository. If `packages/cli` were published as it stands, `npx mirante` would fail to resolve them. So `scripts/build-release.mjs` stages a self-contained package in `release/` (git-ignored):
 
 - the CLI and the three workspace packages, bundled into `dist/bin.js` with esbuild;
+- the local translation worker in `dist/translation-worker.js`, and the explicit
+  model installer in `dist/setup-translations.mjs` (model weights are not bundled);
 - the built board, in `web/`;
 - a generated `package.json` whose runtime dependencies are read from the workspace manifests, so they cannot drift from what the code was tested against. Only real packages remain external: `better-sqlite3` is a native addon, and the rest are CommonJS.
 
@@ -32,13 +34,25 @@ The workspace packages (`@mirante/shared`, `installer`, `daemon`) are private an
 
    The smoke test uses a throwaway `HOME`, so your real Claude Code settings are never touched. CI runs the same two commands (the `package` job), so a change that breaks publishing fails the pull request.
 
+   To also verify actual local translation from the packaged worker, point the
+   smoke test at models already installed on your machine:
+
+   ```bash
+   MIRANTE_SMOKE_TRANSLATION_MODELS="$HOME/.mirante/translations/models" pnpm release:smoke
+   ```
+
+   The test uses a synthetic instruction. It does not download model weights or
+   execute a Claude Code/Codex agent. npm installation skips unused CUDA binaries.
+
 4. **Look at what ships.**
 
    ```bash
    cd release && npm pack --dry-run
    ```
 
-   Expect `dist/bin.js`, `web/`, `package.json`, `LICENSE`, `README.md`. Nothing else.
+   Expect `dist/bin.js`, `dist/translation-worker.js`,
+   `dist/setup-translations.mjs`, `web/`, `package.json`, `LICENSE`, `README.md`.
+   Source files, workspace dependencies and model weights must stay out.
 
 5. **Publish.** You need to be logged in as the package owner (`npm login`, with 2FA):
 
@@ -63,3 +77,8 @@ The workspace packages (`@mirante/shared`, `installer`, `daemon`) are private an
    ```
 
 A published version cannot be replaced. If something is wrong, publish the next one; `npm deprecate mirante@<version> "<reason>"` warns anyone still on it.
+
+Before publishing, update the README's release-availability note to the version
+being shipped and remove warnings about features that are now included. Building
+`release/`, testing it, or updating the repository does not publish anything to
+npm; only the explicit publish step changes what `npx mirante@latest` downloads.

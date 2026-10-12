@@ -39,7 +39,11 @@ export const usePointerGlow = (): ((event: ReactPointerEvent<HTMLElement>) => vo
   return useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (frame.current || prefersStill()) return;
     const card = event.currentTarget;
-    const { x, y } = glowPoint(card.getBoundingClientRect(), event.clientX, event.clientY);
+    const rect = card.getBoundingClientRect();
+    const point = glowPoint(rect, event.clientX, event.clientY);
+    // Canvas zoom changes screen pixels, while CSS glow coordinates stay local.
+    const x = rect.width ? (point.x * card.offsetWidth) / rect.width : 0;
+    const y = rect.height ? (point.y * card.offsetHeight) / rect.height : 0;
     frame.current = requestAnimationFrame(() => {
       frame.current = 0;
       card.style.setProperty('--px', `${x}px`);
