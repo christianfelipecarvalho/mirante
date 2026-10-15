@@ -5,7 +5,16 @@ export const taskPlanPayload = z
   .object({
     planId: z.string().min(1),
     scopeId: z.string().min(1).optional(),
-    sourceTool: z.enum(['update_plan', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList']),
+    sourceTool: z.enum([
+      'update_plan',
+      'TodoWrite',
+      'TaskCreate',
+      'TaskUpdate',
+      'TaskList',
+      'Markdown',
+    ]),
+    /** Explicitly recorded checklist file, relative to the session's project. */
+    sourceFile: z.string().min(1).max(4096).optional(),
     completeness: z.enum(['full', 'partial']),
     steps: z
       .array(

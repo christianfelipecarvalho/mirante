@@ -206,9 +206,12 @@ const hookFacts = (payload: HookPayload, context: HookContext): DraftEvent[] => 
         output: payload.tool_response,
         sessionId: payload.session_id,
         agentId: base.agentId,
+        projectPath: base.projectPath,
         ...(payload.prompt_id ? { scopeId: payload.prompt_id } : {}),
       });
-      if (plan)
+      // A hook cannot establish whether a Markdown file is shared with the
+      // parent. Transcript replay resolves that before assigning child progress.
+      if (plan && (plan.sourceTool !== 'Markdown' || base.agentId === MAIN_AGENT_ID))
         events.push({
           ...base,
           correlationId: payload.tool_use_id,

@@ -1,5 +1,7 @@
+import { isAbsolute, resolve } from 'node:path';
 import { MAIN_AGENT_ID, type TaskPlan } from '@mirante/shared';
 import { scrubSecrets } from './redact.js';
+import { confirmedMarkdownPlan, markdownPlanId } from './markdown-plan.js';
 
 type WorkPlanStep = TaskPlan['steps'][number];
 
@@ -45,6 +47,7 @@ type ConfirmedPlanInput = {
   sessionId: string;
   agentId: string;
   scopeId?: string;
+  projectPath?: string;
 };
 
 /**
@@ -55,11 +58,25 @@ type ConfirmedPlanInput = {
  */
 export class ConfirmedClaudePlans {
   private readonly views = new Map<string, { steps: WorkPlanStep[]; complete: boolean }>();
+  private readonly markdownSources = new Map<string, Map<string, { scopeId?: string }>>();
 
   confirm(context: ConfirmedPlanInput): TaskPlan | undefined {
     const { toolName, sessionId, agentId, scopeId } = context;
-    if (!['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'].includes(toolName)) return undefined;
     if (failedWorkPlanResult(context.output)) return undefined;
+    if (toolName === 'Write' || toolName === 'Edit') {
+      const plan = confirmedMarkdownPlan(context);
+      const key = this.markdownRoot(context);
+      if (plan?.sourceFile && key) {
+        const sources = this.markdownSources.get(key) ?? new Map<string, { scopeId?: string }>();
+        sources.delete(plan.sourceFile);
+        sources.set(plan.sourceFile, { ...(scopeId ? { scopeId } : {}) });
+        if (sources.size > 64) sources.delete(sources.keys().next().value!);
+        this.markdownSources.set(key, sources);
+      }
+      return plan;
+    }
+    if (toolName === 'Bash') return this.markdownReference(context);
+    if (!['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'].includes(toolName)) return undefined;
     const input = record(context.input);
     const output = record(context.output);
     const family = toolName === 'TodoWrite' ? 'todos' : 'tasks';
@@ -165,5 +182,48 @@ export class ConfirmedClaudePlans {
 
     steps = normalizeWorkPlan(steps);
     return steps ? snapshot(steps, complete) : uncertainMutation();
+  }
+
+  private markdownRoot(context: ConfirmedPlanInput): string | undefined {
+    return context.projectPath && isAbsolute(context.projectPath)
+      ? JSON.stringify([context.sessionId, context.agentId, resolve(context.projectPath)])
+      : undefined;
+  }
+
+  /** A confirmed reference can reattach a known file, but never proves its contents. */
+  private markdownReference(context: ConfirmedPlanInput): TaskPlan | undefined {
+    const key = this.markdownRoot(context);
+    const sources = key ? this.markdownSources.get(key) : undefined;
+    const input = record(context.input);
+    const output = record(context.output);
+    if (
+      !sources ||
+      !context.scopeId ||
+      typeof input?.command !== 'string' ||
+      !output ||
+      output.error !== undefined ||
+      output.status === 'failed' ||
+      (typeof output.exitCode === 'number' && output.exitCode !== 0) ||
+      (typeof output.exit_code === 'number' && output.exit_code !== 0)
+    )
+      return undefined;
+    const command = input.command;
+    const references = [...sources].filter(([sourceFile]) =>
+      [sourceFile, resolve(context.projectPath!, sourceFile)].some(
+        (path) => command.includes(`'${path}'`) || command.includes(`"${path}"`),
+      ),
+    );
+    if (references.length !== 1) return undefined;
+    const [sourceFile, previous] = references[0]!;
+    if (previous.scopeId === context.scopeId) return undefined;
+    sources.set(sourceFile, { scopeId: context.scopeId });
+    return {
+      planId: markdownPlanId(context, sourceFile),
+      scopeId: context.scopeId,
+      sourceTool: 'Markdown',
+      sourceFile,
+      completeness: 'partial',
+      steps: [],
+    };
   }
 }

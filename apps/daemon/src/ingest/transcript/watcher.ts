@@ -4,6 +4,7 @@ import { REREADABLE_KINDS, type DraftEvent, type MiranteEvent } from '@mirante/s
 import type { EventLog } from '../../core/eventlog.js';
 import { locateSessions, sessionSignature, type LocatedSession } from './locate.js';
 import { parseSessionTranscript } from './parse.js';
+import { MarkdownPlanFiles } from './plan-files.js';
 
 /**
  * A stable identity for an event, used to tell what a re-parse already emitted.
@@ -62,6 +63,10 @@ export class TranscriptWatcher {
   private readonly historicalFinishes = new Set<string>();
   private timer: NodeJS.Timeout | undefined;
   private scanning = false;
+  private readonly planFiles = new MarkdownPlanFiles();
+  /** Hook-only closes must constrain file following, including after a restart. */
+  private readonly hookLifecycle = new Map<string, Map<number, MiranteEvent>>();
+  private lifecycleLogId = 0;
 
   constructor(options: WatcherOptions) {
     this.options = {
@@ -79,11 +84,14 @@ export class TranscriptWatcher {
    */
   reindexFromLog(): void {
     for (const event of this.options.log.replay()) {
+      this.rememberHookLifecycle(event);
+      this.lifecycleLogId = event.id;
+      if (event.kind === 'task.plan.updated') this.planFiles.restore(event);
       if (event.kind === 'agent.started' && event.dedupeKey)
         this.historicalStarts.add(`${event.sessionId}|${event.dedupeKey}`);
       if (event.kind === 'agent.finished' && event.dedupeKey)
         this.historicalFinishes.add(`${event.sessionId}|${event.dedupeKey}`);
-      if (event.source !== 'transcript') continue;
+      if (event.source !== 'transcript' && event.source !== 'plan-file') continue;
       this.seen(event.sessionId).add(signatureOf(event));
     }
   }
@@ -105,15 +113,34 @@ export class TranscriptWatcher {
     if (this.scanning) return 0;
     this.scanning = true;
     try {
+      // Read only arrivals since the previous pass. These events already exist
+      // in the log and must not be appended again as transcript observations.
+      for (const event of this.options.log.replay(this.lifecycleLogId)) {
+        this.rememberHookLifecycle(event);
+        this.lifecycleLogId = event.id;
+      }
       let appended = 0;
+      const sessionIds = new Set<string>();
       for (const session of locateSessions(
         this.options.projectsDir,
         this.options.maxAgeMs,
         this.options.ignoreSlugs,
         this.options.knownSessionIds,
       )) {
+        sessionIds.add(session.sessionId);
         appended += this.scanSession(session);
+        const seen = this.seen(session.sessionId);
+        const plans = this.planFiles
+          .read(session.sessionId)
+          .filter((event) => !seen.has(signatureOf(event)));
+        if (plans.length) {
+          for (const event of plans) seen.add(signatureOf(event));
+          const events = this.options.log.appendMany(plans);
+          this.options.onEvents(events);
+          appended += events.length;
+        }
       }
+      this.planFiles.forgetExcept(sessionIds);
       return appended;
     } finally {
       this.scanning = false;
@@ -147,6 +174,11 @@ export class TranscriptWatcher {
 
     const seen = this.seen(session.sessionId);
     const historical = session.lastModifiedMs < Date.now() - this.options.maxAgeMs;
+    const lifecycle = this.hookLifecycle.get(session.sessionId);
+    const planContext = lifecycle
+      ? [...lifecycle.values(), ...parsed.events].sort((a, b) => a.ts.localeCompare(b.ts))
+      : parsed.events;
+    this.planFiles.remember(session.sessionId, planContext, historical);
     const fresh = parsed.events.filter(
       (event) =>
         !seen.has(signatureOf(event)) &&
@@ -165,6 +197,19 @@ export class TranscriptWatcher {
     const appended = this.options.log.appendMany(fresh);
     this.options.onEvents(appended);
     return appended.length;
+  }
+
+  private rememberHookLifecycle(event: MiranteEvent): void {
+    if (
+      event.source !== 'hook' ||
+      !['session.started', 'session.ended', 'agent.started', 'agent.finished'].includes(event.kind)
+    )
+      return;
+    const events = this.hookLifecycle.get(event.sessionId) ?? new Map<number, MiranteEvent>();
+    if (events.has(event.id)) return;
+    events.set(event.id, event);
+    this.hookLifecycle.set(event.sessionId, events);
+    this.signatures.delete(event.sessionId);
   }
 
   private seen(sessionId: string): Set<string> {

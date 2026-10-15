@@ -186,6 +186,13 @@ summary.task-progress-summary:focus-visible {
   color: var(--text-secondary);
   margin-bottom: 12px;
 }
+.task-progress-source {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
 .task-progress-steps {
   list-style: none;
   padding: 0;

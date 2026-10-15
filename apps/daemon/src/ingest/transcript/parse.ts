@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import type { DraftEvent, Entrypoint } from '@mirante/shared';
 import {
   MAIN_AGENT_ID,
@@ -792,7 +793,12 @@ const emitWorkPlans = (
     }
     if (entry.type === 'assistant') {
       for (const block of toolUseBlocks(entry)) {
-        if (!['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'].includes(block.name)) continue;
+        if (
+          !['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'Write', 'Edit', 'Bash'].includes(
+            block.name,
+          )
+        )
+          continue;
         calls.set(block.id, {
           owner: agentId,
           entry,
@@ -831,6 +837,7 @@ const emitWorkPlans = (
         output,
         sessionId,
         agentId: call.owner,
+        projectPath: call.entry.cwd ?? entry.cwd ?? '',
         ...(call.scopeId ? { scopeId: call.scopeId } : {}),
       });
       if (!payload) continue;
@@ -848,7 +855,28 @@ const emitWorkPlans = (
       });
     }
   }
-  return events;
+  // Establish ownership from confirmed snapshots before emitting any of them.
+  // A shared project checklist describes the main assignment; a child that
+  // edits it has not thereby completed every sibling's work. Collecting first
+  // also handles a child write recorded before the main agent's first write.
+  const fileKey = (event: Extract<DraftEvent, { kind: 'task.plan.updated' }>) =>
+    JSON.stringify([event.sessionId, resolve(event.projectPath), event.payload.sourceFile]);
+  const fileOwners = new Map<string, Set<string>>();
+  for (const event of events) {
+    if (event.kind !== 'task.plan.updated' || event.payload.sourceTool !== 'Markdown') continue;
+    const key = fileKey(event);
+    const owners = fileOwners.get(key) ?? new Set<string>();
+    owners.add(event.agentId);
+    fileOwners.set(key, owners);
+  }
+  return events.map((event) =>
+    event.kind === 'task.plan.updated' &&
+    event.payload.sourceTool === 'Markdown' &&
+    event.agentId !== MAIN_AGENT_ID &&
+    (fileOwners.get(fileKey(event))?.size ?? 0) > 1
+      ? { ...event, payload: { ...event.payload, completeness: 'partial' } }
+      : event,
+  );
 };
 
 /**

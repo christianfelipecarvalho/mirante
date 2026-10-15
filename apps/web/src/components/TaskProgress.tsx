@@ -57,6 +57,7 @@ export const TaskProgress = ({
         data-tone={state.tone}
       >
         <div className="task-progress-summary">{summary}</div>
+        <p className="task-progress-explanation">{t('progress.recordHint')}</p>
       </section>
     );
   return (
@@ -71,6 +72,11 @@ export const TaskProgress = ({
           </span>
         </summary>
         <div className="task-progress-body" id={`${id}-steps`}>
+          {plan.sourceTool === 'Markdown' && plan.sourceFile && (
+            <p className="task-progress-source">
+              {t('progress.fileChecklist', { file: plan.sourceFile })}
+            </p>
+          )}
           <p className="task-progress-explanation">
             {plan.completeness === 'partial'
               ? t('progress.partialHint')

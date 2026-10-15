@@ -299,6 +299,9 @@ const en = {
   'progress.count': '{completed} of {total} steps completed',
   'progress.unknown': 'No plan recorded',
   'progress.empty': 'Recorded plan has no steps',
+  'progress.recordHint':
+    'Ask the agent to record tasks or save a plan with checkboxes and keep it updated.',
+  'progress.fileChecklist': 'File checklist: {file}',
   'progress.partial': 'Partial plan record',
   'progress.partialHint':
     'The available steps do not establish a percentage for the complete plan.',
@@ -793,6 +796,9 @@ const ptBR: Record<Key, string> = {
   'progress.count': '{completed} de {total} etapas concluídas',
   'progress.unknown': 'Nenhum plano registrado',
   'progress.empty': 'Plano registrado sem etapas',
+  'progress.recordHint':
+    'Peça ao agente para registrar tarefas ou salvar um plano com caixas de seleção e mantê-lo atualizado.',
+  'progress.fileChecklist': 'Checklist do arquivo: {file}',
   'progress.partial': 'Registro parcial do plano',
   'progress.partialHint':
     'As etapas disponíveis não permitem calcular a porcentagem do plano completo.',

@@ -150,6 +150,28 @@ describe('assignment-scoped plan projection', () => {
     projector.applyAll([prompt(1), update(2), prompt(3, 'sim'), prompt(1)]);
     expect(workProgress(root(projector)?.plan).percent).toBe(33);
   });
+  it('keeps the real request scope across remote-session hand-backs recorded by hooks', () => {
+    const projector = new BoardProjector();
+    const handback = prompt(
+      3,
+      'Another Claude session sent a message:\n<agent-message from="reviewer">\n[Subagent hand-back] Review completed.',
+    );
+    projector.applyAll([
+      prompt(1),
+      update(2, { ...plan(1), scopeId: 'request-1' }),
+      { ...handback, source: 'hook' },
+    ]);
+    expect(workProgress(root(projector)?.plan).percent).toBe(33);
+
+    projector.apply(update(4, { ...plan(2), scopeId: 'request-1' }));
+    expect(workProgress(root(projector)?.plan).percent).toBe(66);
+
+    projector.applyAll([
+      prompt(5, 'Agora implemente uma nova tarefa'),
+      update(6, { ...plan(3), scopeId: 'request-1' }),
+    ]);
+    expect(root(projector)?.plan).toBeUndefined();
+  });
   it('rejects a historical old assignment snapshot and does not reset on a start reread', () => {
     const projector = new BoardProjector();
     const started = event(

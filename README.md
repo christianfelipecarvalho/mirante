@@ -14,7 +14,10 @@ Mirante is a local, browser-based board that answers those questions while you k
 
 **Pre-release — M1 feature-complete.** Published on npm as [`mirante`](https://www.npmjs.com/package/mirante); see [Install](#install). Expect rough edges and breaking changes between alphas. See the [roadmap](#roadmap).
 
-**Release version: `0.1.0-alpha.2`.** This version includes the refreshed theme
+**Release version: `0.1.0-alpha.3`.** This version adds live progress from recorded
+Markdown checklists, including updates through terminal commands, and preserves
+plan progress when subagents report back. Shared checklists keep each agent's
+progress distinct. It also includes the refreshed theme
 and activity effects, canvas zoom and dragging, persistent agent filters,
 individual card positioning, agent recovery controls, corrected token and cost
 updates, instruction capture repairs, and local English/Portuguese translation.
@@ -95,12 +98,20 @@ and supports collapsible branches, keyboard navigation and small screens.
 A small circle beside each agent shows that agent's own checklist percentage,
 updated as completed steps arrive. Expand **View steps** to read the plan and
 its current stage. Codex `update_plan`, Claude `TodoWrite`, and native task lists
-are captured only after successful results. Completed steps have equal weight;
-working steps, elapsed time, tokens, and a session close do not imply completion.
+are captured only after successful results. Claude can also save a Markdown plan
+inside the project: use a plan/progress filename and heading, with `- [ ]` and
+`- [x]` checklist items. A successful `Write` or `Edit` registers that file;
+Mirante then follows updates to the same file while the assignment is active.
+Expanded steps show the source filename. This reads only the registered plan,
+without scanning other project files or interpreting percentages written in prose.
+Completed steps have equal weight; working steps, elapsed time, tokens, and a
+session close do not imply completion.
 Missing, empty or partial plans have no numeric percentage. A shared list with
 tasks owned by another agent remains partial for a subagent. New/reopened steps
 can lower it, and a new assignment clears the previous plan. Parent and child
-checklists are kept separate.
+checklists are kept separate. When an agent explicitly reuses a previously
+recorded checklist file in a later request, Mirante reads that file again for
+the new request; an unrelated request does not inherit its percentage.
 
 Return rows in the activity show the agent's recorded response. Short replies
 are readable inline; **Read response** expands long replies while preserving

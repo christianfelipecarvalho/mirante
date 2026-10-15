@@ -46,6 +46,7 @@ export const dedupeKeys = {
  */
 const SOURCE_PRECEDENCE: Record<EventSource, number> = {
   transcript: 40,
+  'plan-file': 40,
   // Codex's equivalent of the transcript, and the only source for a Codex
   // session, so it never competes with another for the same fact.
   'codex-rollout': 40,

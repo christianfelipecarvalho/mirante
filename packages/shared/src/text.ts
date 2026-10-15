@@ -26,7 +26,12 @@ export const INJECTED_MESSAGE_PREFIXES = [
  */
 export const isInjectedMessage = (text: string): boolean => {
   const head = text.trimStart();
-  return INJECTED_MESSAGE_PREFIXES.some((prefix) => head.startsWith(prefix));
+  return (
+    INJECTED_MESSAGE_PREFIXES.some((prefix) => head.startsWith(prefix)) ||
+    // Claude's remote sessions prepend this wrapper to subagent hand-backs.
+    // Hooks record the text without the transcript's `isMeta` flag.
+    /^Another Claude session sent a message:\s*<agent-message(?:\s|>)/.test(head)
+  );
 };
 
 /**

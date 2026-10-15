@@ -90,6 +90,218 @@ describe('work-plan normalization at ingest', () => {
 });
 
 describe('confirmed Claude checklist snapshots', () => {
+  it('reattaches a previously confirmed file to a new request only after a paired successful Bash reference', () => {
+    const filePath = '/tmp/project/PLANO.md';
+    const content = '# Plano\n- [x] Read\n- [ ] Implement';
+    const initial = [
+      prompt(),
+      use('Write', { file_path: filePath, content }),
+      result({ filePath, content }),
+    ];
+    const request = {
+      ...prompt('next', 'Implement the next stage'),
+      timestamp: '2026-09-01T09:00:02.000Z',
+    };
+    const bash = {
+      ...use('Bash', { command: 'python3 -c \'p="PLANO.md"; print(p)\'' }, 'shell'),
+      timestamp: '2026-09-01T09:00:03.000Z',
+    };
+    const success = {
+      ...result({ stdout: '', stderr: '', interrupted: false }, 'shell'),
+      timestamp: '2026-09-01T09:00:04.000Z',
+    };
+    expect(plans([...initial, request, bash])).toHaveLength(1);
+    expect(
+      plans([...initial, request, bash, { ...success, toolUseResult: { interrupted: true } }]),
+    ).toHaveLength(1);
+    const events = plans([...initial, request, bash, success]);
+    expect(events).toHaveLength(2);
+    expect(events[1]).toMatchObject({
+      ts: success.timestamp,
+      promptId: 'next',
+      payload: {
+        sourceTool: 'Markdown',
+        sourceFile: 'PLANO.md',
+        scopeId: 'next',
+        completeness: 'partial',
+        steps: [],
+      },
+    });
+    expect(events[1]?.payload.planId).not.toBe(events[0]?.payload.planId);
+  });
+
+  it.each([false, true])(
+    'keeps a shared project checklist partial for children regardless of write order (%s)',
+    (childFirst) => {
+      const filePath = '/tmp/project/PLANO.md';
+      const content = '# Plano\n- [x] Main work\n- [ ] Child work';
+      const input = { file_path: filePath, content };
+      const output = { filePath, content };
+      const first = '2026-09-01T09:00:01.000Z';
+      const second = '2026-09-01T09:00:02.000Z';
+      const events = plans(
+        [
+          prompt(),
+          use('Write', input, 'main-write'),
+          { ...result(output, 'main-write'), timestamp: childFirst ? second : first },
+        ],
+        [
+          {
+            agentId: 'child',
+            lines: [
+              prompt(),
+              use('Write', input, 'child-write'),
+              { ...result(output, 'child-write'), timestamp: childFirst ? first : second },
+            ],
+          },
+        ],
+      );
+      expect(events.find((event) => event.agentId === MAIN_AGENT_ID)?.payload.completeness).toBe(
+        'full',
+      );
+      expect(events.find((event) => event.agentId === 'child')?.payload.completeness).toBe(
+        'partial',
+      );
+    },
+  );
+
+  it('does not let a failed or unpaired main write contaminate a child-owned checklist', () => {
+    const filePath = '/tmp/project/plan.md';
+    const content = '# Plan\n- [x] Child work';
+    const input = { file_path: filePath, content };
+    const output = { filePath, content };
+    const events = plans(
+      [
+        prompt(),
+        use('Write', input, 'failed-write'),
+        result(output, 'failed-write', true),
+        use('Write', input, 'unpaired-write'),
+      ],
+      [
+        {
+          agentId: 'child',
+          lines: [prompt(), use('Write', input, 'child-write'), result(output, 'child-write')],
+        },
+      ],
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]?.payload.completeness).toBe('full');
+  });
+
+  it('does not merge plans with the same filename in distinct project directories', () => {
+    const content = '# Plan\n- [x] Local work';
+    const events = plans(
+      [
+        prompt(),
+        use('Write', { file_path: '/tmp/project/plan.md', content }, 'main-write'),
+        result({ filePath: '/tmp/project/plan.md', content }, 'main-write'),
+      ],
+      [
+        {
+          agentId: 'child',
+          lines: [
+            { ...prompt(), cwd: '/tmp/other-project' },
+            {
+              ...use('Write', { file_path: '/tmp/other-project/plan.md', content }, 'child-write'),
+              cwd: '/tmp/other-project',
+            },
+            {
+              ...result({ filePath: '/tmp/other-project/plan.md', content }, 'child-write'),
+              cwd: '/tmp/other-project',
+            },
+          ],
+        },
+      ],
+    );
+    expect(events).toHaveLength(2);
+    expect(events.every((event) => event.payload.completeness === 'full')).toBe(true);
+  });
+
+  it('captures a confirmed Markdown plan written with ordinary file tools', () => {
+    const filePath = '/tmp/project/PLANO-CANVAS.md';
+    const content = '# Plano\n\nProgresso: 90%\n\n- [x] Read\n- [ ] Implement\n- [ ] Verify\n';
+    const input = { file_path: filePath, content };
+    expect(plans([prompt(), use('Write', input)])).toEqual([]);
+    const written = result({ type: 'create', filePath, content, userModified: false });
+    const editInput = {
+      file_path: filePath,
+      old_string: '- [ ] Implement',
+      new_string: '- [x] Implement',
+    };
+    const edited = result(
+      {
+        filePath,
+        originalFile: content,
+        oldString: editInput.old_string,
+        newString: editInput.new_string,
+        replaceAll: false,
+        userModified: false,
+      },
+      'edit',
+    );
+    edited.timestamp = '2026-09-01T09:00:02.000Z';
+    const events = plans([
+      prompt(),
+      use('Write', input),
+      written,
+      { ...use('Edit', editInput, 'edit'), timestamp: doneTs },
+      edited,
+    ]);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      agentId: MAIN_AGENT_ID,
+      promptId: 'prompt',
+      payload: {
+        sourceTool: 'Markdown',
+        sourceFile: 'PLANO-CANVAS.md',
+        scopeId: 'prompt',
+        completeness: 'full',
+      },
+    });
+    expect(events[1]?.payload.steps.map((step) => step.status)).toEqual([
+      'completed',
+      'completed',
+      'pending',
+    ]);
+    expect(events[1]?.payload.planId).toBe(events[0]?.payload.planId);
+    expect(
+      plans([
+        prompt(),
+        use('Write', input),
+        {
+          ...written,
+          message: {
+            role: 'user',
+            content: [
+              { type: 'tool_result', tool_use_id: 'call', is_error: true, content: 'Failed' },
+            ],
+          },
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('does not borrow a Markdown snapshot from a parallel result or another owner', () => {
+    const filePath = '/tmp/project/progress.md';
+    const content = '# Progress\n- [x] Read\n- [ ] Implement';
+    const confirmation = result({ filePath, content });
+    confirmation.message.content.push({
+      type: 'tool_result',
+      tool_use_id: 'other',
+      is_error: false,
+      content: 'Confirmed',
+    });
+    expect(plans([prompt(), use('Write', { file_path: filePath, content }), confirmation])).toEqual(
+      [],
+    );
+    const child = plans(
+      [result({ filePath, content })],
+      [{ agentId: 'child', lines: [prompt(), use('Write', { file_path: filePath, content })] }],
+    );
+    expect(child[0]?.agentId).toBe('child');
+    expect(child[0]?.payload.sourceTool).toBe('Markdown');
+  });
+
   it('waits for a successful paired TodoWrite result and uses the applied native snapshot', () => {
     const input = { todos: [todo('Proposed step')] };
     expect(plans([prompt(), use('TodoWrite', input)])).toEqual([]);

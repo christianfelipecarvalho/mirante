@@ -45,6 +45,8 @@ export type EventKind = z.infer<typeof eventKindSchema>;
 export const eventSourceSchema = z.enum([
   'hook',
   'transcript',
+  // A previously recorded Markdown checklist, reread locally while its task runs.
+  'plan-file',
   'statusline',
   'usage-command',
   // Claude Code's cached plan figure, read from its state file. Its own source so
